@@ -42,6 +42,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://article_index:article_index@db:5432/article_index}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
       API_KEY: ${API_KEY:-change-me-long-random}
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}

@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 from shared.ollama_client import OllamaClient
 from shared.database import document_repo
 from shared.processor import article_processor, embedding_manager
+from shared.celery_client import celery_app
+from celery.result import AsyncResult
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -106,6 +108,8 @@ async def root():
             "/health",
             "/stats",
             "/articles/",
+            "/articles/async",
+            "/tasks/{task_id}",
             "/search",
             "/rag",
             "/admin"
@@ -150,7 +154,7 @@ async def get_stats():
 
 @app.post("/articles/")
 async def create_article(article: ArticleCreate):
-    """Create a new article with embeddings."""
+    """Create a new article with embeddings (synchronous - blocks until complete)."""
     try:
         result = await article_processor.process_article(
             title=article.title,
@@ -165,9 +169,37 @@ async def create_article(article: ArticleCreate):
         raise HTTPException(status_code=500, detail=f"Failed to create article: {str(e)}")
 
 
+@app.post("/articles/async")
+async def create_article_async(article: ArticleCreate):
+    """Enqueue article for background processing. Returns task ID for status polling."""
+    try:
+        task = celery_app.send_task(
+            "tasks.process_article_task",
+            args=[
+                article.title,
+                article.content,
+            ],
+            kwargs={
+                "metadata": article.metadata or {},
+                "chunk_size": article.chunk_size,
+                "chunk_overlap": article.chunk_overlap,
+            },
+        )
+        return {
+            "task_id": task.id,
+            "status": "accepted",
+            "message": "Article queued for processing",
+        }
+    except Exception as e:
+        logger.error(f"Failed to enqueue article: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to enqueue article: {str(e)}"
+        )
+
+
 @app.post("/articles/html")
 async def create_html_article(article: HTMLArticleCreate):
-    """Create a new article from HTML content."""
+    """Create a new article from HTML content (synchronous)."""
     try:
         result = await article_processor.process_html_article(
             title=article.title,
@@ -178,6 +210,27 @@ async def create_html_article(article: HTMLArticleCreate):
     except Exception as e:
         logger.error(f"Failed to create HTML article: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create HTML article: {str(e)}")
+
+
+@app.post("/articles/html/async")
+async def create_html_article_async(article: HTMLArticleCreate):
+    """Enqueue HTML article for background processing. Returns task ID for status polling."""
+    try:
+        task = celery_app.send_task(
+            "tasks.process_html_article_task",
+            args=[article.title, article.html_content],
+            kwargs={"metadata": article.metadata or {}},
+        )
+        return {
+            "task_id": task.id,
+            "status": "accepted",
+            "message": "HTML article queued for processing",
+        }
+    except Exception as e:
+        logger.error(f"Failed to enqueue HTML article: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to enqueue HTML article: {str(e)}"
+        )
 
 
 @app.post("/articles/batch")
@@ -318,6 +371,29 @@ async def rag_query(query: RAGQuery):
 
 
 # Admin endpoints
+@app.get("/tasks/{task_id}")
+async def get_task_status(task_id: str):
+    """Get status and result of an async task."""
+    try:
+        result = AsyncResult(task_id, app=celery_app)
+        response = {
+            "task_id": task_id,
+            "status": result.status,
+        }
+        if result.status == "SUCCESS":
+            response["result"] = result.result
+        elif result.status == "FAILURE":
+            response["error"] = str(result.result) if result.result else "Unknown error"
+        elif result.status in ("PENDING", "STARTED"):
+            response["message"] = "Task in progress"
+        return response
+    except Exception as e:
+        logger.error(f"Failed to get task status: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get task status: {str(e)}"
+        )
+
+
 @app.post("/admin/reindex/{article_id}")
 async def reindex_article(article_id: int, background_tasks: BackgroundTasks):
     """Reindex embeddings for a specific article."""

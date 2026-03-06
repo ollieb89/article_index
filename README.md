@@ -13,75 +13,90 @@ A semantic search and RAG (Retrieval-Augmented Generation) system for articles u
 
 ## Quick Start
 
-### 1. Start the Services
+### 1. Configure
 
 ```bash
-# Start PostgreSQL, Redis, API, and Worker
+cp .env.example .env
+# Edit .env if needed (defaults work for Docker)
+```
+
+### 2. Start the Services
+
+```bash
 docker-compose up -d
-
-# Wait for services to be ready
-sleep 10
+# Wait for services to be ready (~15s)
+sleep 15
 ```
 
-### 2. Initialize the Database Schema
-
-```bash
-# Connect to the database
-docker exec -it article_index_db_1 psql -U articles -d articles
-
-# Run the schema setup
-\i /docker-entrypoint-initdb.d/schema.sql
-```
+Schema and indexes are applied automatically via `schema.sql` and `indexes.sql` in `docker-entrypoint-initdb.d/`.
 
 ### 3. Start Ollama and Pull Models
 
 ```bash
-# Start Ollama (if not already running)
 ollama serve
-
-# Pull required models
-ollama pull nomic-embed-text  # For embeddings
-ollama pull llama3.2          # For text generation
+ollama pull nomic-embed-text
+ollama pull llama3.2
 ```
 
-### 4. Test the API
+### 4. Smoke Test
 
 ```bash
-# Health check
-curl http://localhost:999/health
+./scripts/smoke_test.sh
+# Or with custom API base: API_BASE=http://localhost:8001 ./scripts/smoke_test.sh
+```
 
-# Create a test article
-curl -X POST http://localhost:999/articles/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Test Article",
-    "content": "This is a test article about artificial intelligence and machine learning. AI is transforming many industries."
-  }'
+### 5. Manual API Test
 
-# Search for similar content
-curl -X POST http://localhost:999/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "machine learning",
-    "limit": 5
-  }'
+```bash
+# Health
+curl http://localhost:8001/health
 
-# Ask a question with RAG
-curl -X POST http://localhost:999/rag \
+# Create article (sync)
+curl -X POST http://localhost:8001/articles/ \
   -H "Content-Type: application/json" \
-  -d '{
-    "question": "What industries is AI transforming?"
-  }'
+  -d '{"title": "Test", "content": "AI and machine learning."}'
+
+# Async ingestion (returns task_id)
+curl -X POST http://localhost:8001/articles/async \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Async Test", "content": "Background processing."}'
+
+# Task status
+curl http://localhost:8001/tasks/<task_id>
+
+# Search
+curl -X POST http://localhost:8001/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "machine learning", "limit": 5}'
+
+# RAG
+curl -X POST http://localhost:8001/rag \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is AI?"}'
+```
+
+### Reset
+
+```bash
+docker-compose down -v
+docker-compose up -d
+# Wait, then run smoke test
+sleep 15 && ./scripts/smoke_test.sh
 ```
 
 ## API Endpoints
 
 ### Articles
-- `POST /articles/` - Create a new article
-- `POST /articles/html` - Create article from HTML
+- `POST /articles/` - Create article (sync, blocks until done)
+- `POST /articles/async` - Enqueue article for background processing (returns `task_id`)
+- `POST /articles/html` - Create article from HTML (sync)
+- `POST /articles/html/async` - Enqueue HTML article (async)
 - `POST /articles/batch` - Create multiple articles
 - `GET /articles/` - List articles with pagination
 - `GET /articles/{id}` - Get specific article with chunks
+
+### Tasks
+- `GET /tasks/{task_id}` - Get async task status and result
 
 ### Search & RAG
 - `POST /search` - Semantic search (chunks or documents)

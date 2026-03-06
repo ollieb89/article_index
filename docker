@@ -1,0 +1,382 @@
+CREATE EXTENSION
+CREATE SCHEMA
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+[?1049h[22;0;0t[?1h=                List of relations
+    Schema    |   Name    | Type  |     Owner     
+--------------+-----------+-------+---------------
+ intelligence | chunks    | table | article_index
+ intelligence | documents | table | article_index
+(2 rows)
+
+[7m(END)[27m[K[K[K[7m(END)[27m[K[K...skipping...
+                List of relations
+    Schema    |   Name    | Type  |     Owner     
+--------------+-----------+-------+---------------
+ intelligence | chunks    | table | article_index
+ intelligence | documents | table | article_index
+(2 rows)
+
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[7m(END)[27m[K[K[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[?1l>[?1049l[23;0;0t[?1049h[22;0;0t[?1h=                List of relations
+    Schema    |   Name    | Type  |     Owner     
+--------------+-----------+-------+---------------
+ intelligence | chunks    | table | article_index
+ intelligence | documents | table | article_index
+(2 rows)
+
+[7m(END)[27m[K[H[2J[H[H[2J[H                List of relations
+    Schema    |   Name    | Type  |     Owner     
+--------------+-----------+-------+---------------
+ intelligence | chunks    | table | article_index
+ intelligence | documents | table | article_index
+(2 rows)
+
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[7m(END)[27m[K[K [K^X^X[H[2J[H[H[2J[H                List of relations
+    Schema    |   Name    | Type  |     Owner     
+--------------+-----------+-------+---------------
+ intelligence | chunks    | table | article_index
+ intelligence | documents | table | article_index
+(2 rows)
+
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[7m(END)[27m[K[H[2J[H[H[2J[H                List of relations
+    Schema    |   Name    | Type  |     Owner     
+--------------+-----------+-------+---------------
+ intelligence | chunks    | table | article_index
+ intelligence | documents | table | article_index
+(2 rows)
+
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[7m(END)[27m[K[H[2J[H[H[2J[H                List of relations
+    Schema    |   Name    | Type  |     Owner     
+--------------+-----------+-------+---------------
+ intelligence | chunks    | table | article_index
+ intelligence | documents | table | article_index
+(2 rows)
+
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[1m~[0m
+[7m(END)[27m[K[K[K[7m(END)[27m[K[K [K^X^X[Kqq[K[7m(END)[27m[K[K[K[7m(END)[27m[K[K[7m(END)[27m[K[K[?1l>[?1049l[23;0;0t{"status":"healthy","database":"connected","ollama_embeddings":"working","ollama_generation":"working","stats":{"total_documents":0,"total_chunks":0,"documents_with_embeddings":0,"chunks_with_embeddings":0}}[]#1 [internal] load local bake definitions
+#1 reading from stdin 1.02kB done
+#1 DONE 0.0s
+
+#2 [worker internal] load build definition from Dockerfile
+#2 transferring dockerfile: 269B done
+#2 DONE 0.0s
+
+#3 [api internal] load build definition from Dockerfile
+#3 transferring dockerfile: 265B done
+#3 DONE 0.0s
+
+#4 [api internal] load metadata for docker.io/library/python:3.11
+#4 ...
+
+#5 [auth] library/python:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#4 [api internal] load metadata for docker.io/library/python:3.11
+#4 DONE 1.0s
+
+#6 [api internal] load .dockerignore
+#6 transferring context: 160B done
+#6 DONE 0.0s
+
+#7 [api 1/7] FROM docker.io/library/python:3.11@sha256:33b4060c8f8268bb55f244a11adf6a1d75348f1a3a8335b858c65fe755559b29
+#7 resolve docker.io/library/python:3.11@sha256:33b4060c8f8268bb55f244a11adf6a1d75348f1a3a8335b858c65fe755559b29 0.0s done
+#7 DONE 0.0s
+
+#8 [worker internal] load build context
+#8 transferring context: 22.27kB done
+#8 DONE 0.0s
+
+#9 [api internal] load build context
+#9 transferring context: 57.66kB done
+#9 DONE 0.0s
+
+#10 [api 3/7] COPY requirements-shared.txt .
+#10 CACHED
+
+#11 [api 4/7] COPY api/requirements.txt .
+#11 CACHED
+
+#12 [api 5/7] RUN pip install -r requirements.txt
+#12 CACHED
+
+#13 [api 6/7] COPY shared/ ./shared/
+#13 CACHED
+
+#14 [worker 5/7] RUN pip install -r requirements.txt
+#14 CACHED
+
+#15 [worker 2/7] WORKDIR /app
+#15 CACHED
+
+#16 [worker 3/7] COPY requirements-shared.txt .
+#16 CACHED
+
+#17 [worker 6/7] COPY shared/ ./shared/
+#17 CACHED
+
+#18 [worker 4/7] COPY worker/requirements.txt .
+#18 CACHED
+
+#19 [worker 7/7] COPY worker/ .
+#19 CACHED
+
+#20 [api 7/7] COPY api/ .
+#20 CACHED
+
+#21 [worker] exporting to oci image format
+#21 exporting layers done
+#21 exporting manifest sha256:609b2de4a030baf12a4eb05bcef13e0ac13b236b942f32d498995962d2ce917f done
+#21 exporting config sha256:d30595be3d0d46c966da1e8f7197a1d7d26ae2660940955e292fa7556d569288 0.0s done
+#21 sending tarball
+#21 ...
+
+#22 [api] exporting to oci image format
+#22 exporting layers done
+#22 exporting manifest sha256:7666a36eb8577b32d70da00994fcb9b7d7fc25f89c8bb150203143f5d0f6a16a 0.0s done
+#22 exporting config sha256:41935d89e36cbc3ed0de96786fcfc79368afb29bf72513e79657ba2065a7f3d4 0.0s done
+#22 sending tarball 1.6s done
+#22 DONE 1.7s
+
+#23 importing to docker
+#23 DONE 0.0s
+
+#24 [api] resolving provenance for metadata file
+#24 DONE 0.0s
+
+#21 [worker] exporting to oci image format
+#21 sending tarball 2.4s done
+#21 DONE 2.4s
+
+#25 importing to docker
+#25 DONE 0.0s
+
+#26 [worker] resolving provenance for metadata file
+#26 DONE 0.0s
+{"detail":"Failed to create article: relation \"intelligence.documents\" does not exist"}{"detail":"Failed to list articles: relation \"intelligence.documents\" does not exist"}{
+  "detail": "Failed to create article: relation \"intelligence.documents\" does not exist"
+}
+{"detail":"Search failed: type \"vector\" does not exist"}{"detail":"Search failed: type \"vector\" does not exist"}{"detail":"RAG query failed: type \"vector\" does not exist"}{"detail":"Service unavailable: relation \"intelligence.documents\" does not exist"}{"detail":"Service unavailable: relation \"intelligence.documents\" does not exist"}{
+  "detail": "Service unavailable: relation \"intelligence.documents\" does not exist"
+}
+{
+  "detail": "Service unavailable: relation \"intelligence.documents\" does not exist"
+}
+HTTP/1.1 503 Service Unavailable
+date: Fri, 06 Mar 2026 13:09:30 GMT
+server: uvicorn
+content-length: 84
+content-type: application/json
+
+{"detail":"Service unavailable: relation \"intelligence.documents\" does not exist"}HTTP/1.1 500 Internal Server Error
+date: Fri, 06 Mar 2026 13:09:34 GMT
+server: uvicorn
+content-length: 88
+content-type: application/json
+
+{"detail":"Failed to list articles: relation \"intelligence.documents\" does not exist"}HTTP/1.1 500 Internal Server Error
+date: Fri, 06 Mar 2026 13:09:42 GMT
+server: uvicorn
+content-length: 58
+content-type: application/json
+
+{"detail":"Search failed: type \"vector\" does not exist"}HTTP/1.1 500 Internal Server Error
+date: Fri, 06 Mar 2026 13:09:49 GMT
+server: uvicorn
+content-length: 61
+content-type: application/json
+
+{"detail":"RAG query failed: type \"vector\" does not exist"}article_index-api  | INFO:     Started server process [1]
+article_index-api  | INFO:     Waiting for application startup.
+article_index-api  | INFO:app:Starting up article index API...
+article_index-api  | INFO:httpx:HTTP Request: GET http://host.docker.internal:11434/api/tags "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Pulling embedding model: nomic-embed-text
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/pull "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Successfully pulled nomic-embed-text
+article_index-api  | INFO:httpx:HTTP Request: GET http://host.docker.internal:11434/api/tags "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Pulling chat model: llama3.2
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/pull "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Successfully pulled llama3.2
+article_index-api  | INFO:app:Model availability: {'embedding_model': True, 'chat_model': True}
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/generate "HTTP/1.1 200 OK"
+article_index-api  | INFO:app:Startup complete
+article_index-api  | INFO:     Application startup complete.
+article_index-api  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+article_index-api  | ERROR:shared.processor:Error processing article 'Docker and AI pipelines': relation "intelligence.documents" does not exist
+article_index-api  | ERROR:app:Failed to create article: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:41380 - "POST /articles/ HTTP/1.1" 500 Internal Server Error
+article_index-api  | ERROR:app:Failed to list articles: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:34196 - "GET /articles/ HTTP/1.1" 500 Internal Server Error
+article_index-api  | ERROR:shared.processor:Error processing article 'Docker and AI pipelines': relation "intelligence.documents" does not exist
+article_index-api  | ERROR:app:Failed to create article: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:34202 - "POST /articles/ HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | ERROR:app:Search failed: type "vector" does not exist
+article_index-api  | INFO:     172.19.0.1:42948 - "POST /search HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | ERROR:app:Search failed: type "vector" does not exist
+article_index-api  | INFO:     172.19.0.1:42952 - "POST /search HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | ERROR:app:RAG query failed: type "vector" does not exist
+article_index-api  | INFO:     172.19.0.1:42954 - "POST /rag HTTP/1.1" 500 Internal Server Error
+article_index-api  | ERROR:app:Health check failed: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:57664 - "GET /health HTTP/1.1" 503 Service Unavailable
+article_index-api  | ERROR:app:Health check failed: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:57670 - "GET /health HTTP/1.1" 503 Service Unavailable
+article_index-api  | ERROR:app:Health check failed: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:51548 - "GET /health HTTP/1.1" 503 Service Unavailable
+article_index-api  | ERROR:app:Health check failed: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:48690 - "GET /health HTTP/1.1" 503 Service Unavailable
+article_index-api  | ERROR:app:Health check failed: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:53216 - "GET /health HTTP/1.1" 503 Service Unavailable
+article_index-api  | ERROR:app:Failed to list articles: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:53228 - "GET /articles/ HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | ERROR:app:Search failed: type "vector" does not exist
+article_index-api  | INFO:     172.19.0.1:38928 - "POST /search HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | ERROR:app:RAG query failed: type "vector" does not exist
+article_index-api  | INFO:     172.19.0.1:45420 - "POST /rag HTTP/1.1" 500 Internal Server Error
+article_index-api  | ERROR:app:Health check failed: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:46308 - "GET /health HTTP/1.1" 503 Service Unavailable
+article_index-api  | ERROR:app:Failed to list articles: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:57470 - "GET /articles/ HTTP/1.1" 500 Internal Server Error
+article_index-api  | ERROR:app:Failed to list articles: relation "intelligence.documents" does not exist
+article_index-api  | INFO:     172.19.0.1:57800 - "GET /articles/ HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | ERROR:app:Search failed: type "vector" does not exist
+article_index-api  | INFO:     172.19.0.1:57808 - "POST /search HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/generate "HTTP/1.1 200 OK"
+article_index-api  | INFO:     172.19.0.1:58310 - "GET /health HTTP/1.1" 200 OK
+article_index-api  | INFO:     172.19.0.1:59838 - "GET /articles/ HTTP/1.1" 200 OK
+article_index-api  | ERROR:shared.processor:Error processing article 'Docker and AI pipelines': invalid input for query argument $3: {'source': 'test'} (expected str, got dict)
+article_index-api  | ERROR:app:Failed to create article: invalid input for query argument $3: {'source': 'test'} (expected str, got dict)
+article_index-api  | INFO:     172.19.0.1:54940 - "POST /articles/ HTTP/1.1" 500 Internal Server Error
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:     172.19.0.1:46102 - "POST /search HTTP/1.1" 200 OK
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:     172.19.0.1:59486 - "POST /rag HTTP/1.1" 200 OK
+[Karticle_index-api has been recreated
+article_index-api  | INFO:     Shutting down
+article_index-api  | INFO:     Waiting for application shutdown.
+article_index-api  | INFO:app:Shutting down article index API...
+article_index-api  | INFO:     Application shutdown complete.
+article_index-api  | INFO:     Finished server process [1]
+[Karticle_index-api exited with code 0
+article_index-api  | INFO:     Started server process [1]
+article_index-api  | INFO:     Waiting for application startup.
+article_index-api  | INFO:app:Starting up article index API...
+article_index-api  | INFO:httpx:HTTP Request: GET http://host.docker.internal:11434/api/tags "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Pulling embedding model: nomic-embed-text
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/pull "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Successfully pulled nomic-embed-text
+article_index-api  | INFO:httpx:HTTP Request: GET http://host.docker.internal:11434/api/tags "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Pulling chat model: llama3.2
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/pull "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Successfully pulled llama3.2
+article_index-api  | INFO:app:Model availability: {'embedding_model': True, 'chat_model': True}
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/generate "HTTP/1.1 200 OK"
+article_index-api  | INFO:app:Startup complete
+article_index-api  | INFO:     Application startup complete.
+article_index-api  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:shared.processor:Processed article 'Docker and AI pipelines': 1 chunks created
+article_index-api  | INFO:     172.19.0.1:43418 - "POST /articles/ HTTP/1.1" 200 OK
+article_index-api  | INFO:     172.19.0.1:43426 - "GET /articles/ HTTP/1.1" 200 OK
+article_index-api  | INFO:httpx:HTTP Request: POST http://host.docker.internal:11434/api/embeddings "HTTP/1.1 200 OK"
+article_index-api  | INFO:     172.19.0.1:43430 - "POST /search HTTP/1.1" 200 OK

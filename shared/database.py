@@ -1,4 +1,6 @@
+import json
 import os
+import re
 import asyncpg
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -7,13 +9,22 @@ import asyncio
 from contextlib import asynccontextmanager
 
 
+def _normalize_database_url(url: str) -> str:
+    """Convert SQLAlchemy-style URLs to postgresql:// for asyncpg/psycopg2."""
+    if not url:
+        return url
+    # postgresql+psycopg, postgresql+asyncpg -> postgresql
+    return re.sub(r"^postgresql\+[a-z0-9]+", "postgresql", url, flags=re.IGNORECASE)
+
+
 class DatabaseManager:
     """Database connection manager for PostgreSQL with async and sync support."""
 
     def __init__(self):
-        self.database_url = os.getenv("DATABASE_URL")
-        if not self.database_url:
+        raw_url = os.getenv("DATABASE_URL")
+        if not raw_url:
             raise ValueError("DATABASE_URL environment variable is required")
+        self.database_url = _normalize_database_url(raw_url)
 
     # Async connection methods
     async def get_async_connection(self) -> asyncpg.Connection:
@@ -61,7 +72,7 @@ class DocumentRepository:
         async with self.db.get_async_connection_context() as conn:
             query = """
                 INSERT INTO intelligence.documents (title, content, metadata, embedding)
-                VALUES ($1, $2, $3, $4)
+                VALUES ($1, $2, $3::jsonb, $4)
                 RETURNING id
             """
 
@@ -73,10 +84,10 @@ class DocumentRepository:
                 query,
                 title,
                 content,
-                metadata or {},
+                json.dumps(metadata or {}),
                 embedding_str
             )
-            return result['id']
+            return result["id"]
 
     async def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
         """Get document by ID."""

@@ -1,3 +1,6 @@
+-- Create pgvector extension (required for VECTOR type)
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Create intelligence schema for vector search and RAG
 CREATE SCHEMA IF NOT EXISTS intelligence;
 

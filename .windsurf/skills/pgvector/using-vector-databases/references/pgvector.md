@@ -114,17 +114,17 @@ volumes:
 ### Installation
 
 ```bash
-pip install psycopg2-binary pgvector
+pip install asyncpg2-binary pgvector
 ```
 
 ### Basic Usage
 
 ```python
-import psycopg2
-from pgvector.psycopg2 import register_vector
+import asyncpg2
+from pgvector.asyncpg2 import register_vector
 
 # Connect
-conn = psycopg2.connect(
+conn = asyncpg2.connect(
     host="localhost",
     database="vectordb",
     user="postgres",
@@ -372,7 +372,7 @@ LIMIT 5;
 ### Bulk Insert
 
 ```python
-from psycopg2.extras import execute_values
+from asyncpg2.extras import execute_values
 
 # Prepare batch
 data = [
@@ -579,14 +579,14 @@ LIMIT 5;
 
 ```python
 from qdrant_client import QdrantClient
-import psycopg2
-from pgvector.psycopg2 import register_vector
+import asyncpg2
+from pgvector.asyncpg2 import register_vector
 
 # Source: Qdrant
 qdrant = QdrantClient("localhost", port=6333)
 
 # Destination: PostgreSQL
-conn = psycopg2.connect(database="vectordb")
+conn = asyncpg2.connect(database="vectordb")
 register_vector(conn)
 cur = conn.cursor()
 

@@ -103,17 +103,17 @@ def benchmark_pgvector(
 ) -> Dict:
     """Benchmark pgvector performance."""
     try:
-        import psycopg2
-        from pgvector.psycopg2 import register_vector
+        import asyncpg2
+        from pgvector.asyncpg2 import register_vector
     except ImportError:
-        print("Error: psycopg2 and pgvector not installed")
-        print("  pip install psycopg2-binary pgvector")
+        print("Error: asyncpg2 and pgvector not installed")
+        print("  pip install asyncpg2-binary pgvector")
         return None
 
     if not connection_string:
         connection_string = "postgresql://postgres:password@localhost/vectordb"
 
-    conn = psycopg2.connect(connection_string)
+    conn = asyncpg2.connect(connection_string)
     conn.autocommit = True
     register_vector(conn)
     cur = conn.cursor()

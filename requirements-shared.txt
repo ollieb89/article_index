@@ -1,0 +1,8 @@
+# Shared runtime dependencies (database, processor, ollama_client)
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+httpx==0.25.2
+numpy==1.24.3
+tiktoken==0.5.2
+beautifulsoup4==4.12.2
+python-dotenv==1.0.0

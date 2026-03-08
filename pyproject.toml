@@ -1,0 +1,29 @@
+[project]
+name = "article-index"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "pydantic",
+    "asyncpg",
+    "celery",
+    "pytest",
+    "pytest-asyncio",
+    "psycopg2-binary",
+    "pydantic-settings",
+    "numpy",
+    "sentence-transformers",
+    "scikit-learn",
+    "pandas",
+    "tqdm",
+    "nltk",
+    "rank_bm25",
+    "tiktoken",
+    "openai",
+    "redis",
+    "pydantic[email]"
+]

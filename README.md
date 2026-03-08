@@ -13,75 +13,101 @@ A semantic search and RAG (Retrieval-Augmented Generation) system for articles u
 
 ## Quick Start
 
-### 1. Start the Services
+### 1. Configure
 
 ```bash
-# Start PostgreSQL, Redis, API, and Worker
-docker-compose up -d
-
-# Wait for services to be ready
-sleep 10
+cp .env.example .env
+# Edit .env if needed (defaults work for Docker)
 ```
 
-### 2. Initialize the Database Schema
+### 2. Start the Services
 
 ```bash
-# Connect to the database
-docker exec -it article_index_db_1 psql -U articles -d articles
-
-# Run the schema setup
-\i /docker-entrypoint-initdb.d/schema.sql
+docker compose up -d
+# Wait for services to be ready (~15s)
+sleep 15
 ```
+
+Schema and indexes are applied automatically via `schema.sql` and `indexes.sql` in `docker-entrypoint-initdb.d/`.
 
 ### 3. Start Ollama and Pull Models
 
 ```bash
-# Start Ollama (if not already running)
 ollama serve
-
-# Pull required models
-ollama pull nomic-embed-text  # For embeddings
-ollama pull llama3.2          # For text generation
+ollama pull nomic-embed-text
+ollama pull llama3.2
 ```
 
-### 4. Test the API
+### 4. Smoke Test
 
 ```bash
-# Health check
-curl http://localhost:999/health
+./scripts/smoke_test.sh
+# Or with custom API base: API_BASE=http://localhost:8001 ./scripts/smoke_test.sh
+```
 
-# Create a test article
-curl -X POST http://localhost:999/articles/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Test Article",
-    "content": "This is a test article about artificial intelligence and machine learning. AI is transforming many industries."
-  }'
+### 5. Manual API Test
 
-# Search for similar content
-curl -X POST http://localhost:999/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "machine learning",
-    "limit": 5
-  }'
+All write/admin endpoints require `X-API-Key` header (from `.env` API_KEY).
 
-# Ask a question with RAG
-curl -X POST http://localhost:999/rag \
+```bash
+# Health (no auth)
+curl http://localhost:8001/health
+
+# Create article (sync)
+curl -X POST http://localhost:8001/articles/ \
   -H "Content-Type: application/json" \
-  -d '{
-    "question": "What industries is AI transforming?"
-  }'
+  -H "X-API-Key: change-me-long-random" \
+  -d '{"title": "Test", "content": "AI and machine learning."}'
+
+# Async ingestion (returns task_id)
+curl -X POST http://localhost:8001/articles/async \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: change-me-long-random" \
+  -d '{"title": "Async Test", "content": "Background processing."}'
+
+# URL ingestion (fetches, extracts text, enqueues)
+curl -X POST http://localhost:8001/articles/url/async \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: change-me-long-random" \
+  -d '{"url": "https://example.com/article"}'
+
+# Task status (no auth)
+curl http://localhost:8001/tasks/<task_id>
+
+# Search (no auth)
+curl -X POST http://localhost:8001/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "machine learning", "limit": 5}'
+
+# RAG (no auth)
+curl -X POST http://localhost:8001/rag \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is AI?"}'
+```
+
+### Reset
+
+```bash
+docker-compose down -v
+docker-compose up -d
+# Wait, then run smoke test
+sleep 15 && ./scripts/smoke_test.sh
 ```
 
 ## API Endpoints
 
-### Articles
-- `POST /articles/` - Create a new article
-- `POST /articles/html` - Create article from HTML
+### Articles (all write endpoints require `X-API-Key`)
+- `POST /articles/` - Create article (sync, blocks until done)
+- `POST /articles/async` - Enqueue article for background processing (returns `task_id`)
+- `POST /articles/url/async` - Fetch URL, extract text, enqueue (SSRF-protected)
+- `POST /articles/html` - Create article from HTML (sync)
+- `POST /articles/html/async` - Enqueue HTML article (async)
 - `POST /articles/batch` - Create multiple articles
 - `GET /articles/` - List articles with pagination
 - `GET /articles/{id}` - Get specific article with chunks
+
+### Tasks
+- `GET /tasks/{task_id}` - Get async task status and result
 
 ### Search & RAG
 - `POST /search` - Semantic search (chunks or documents)
@@ -103,6 +129,7 @@ cp .env.example .env
 
 Key environment variables:
 - `DATABASE_URL`: PostgreSQL connection string
+- `API_KEY`: Required for write/admin endpoints (must be set)
 - `REDIS_URL`: Redis connection for Celery
 - `OLLAMA_HOST`: Ollama server URL
 - `RAG_EMBEDDING_MODEL`: Model for embeddings (default: nomic-embed-text)
@@ -133,6 +160,57 @@ Query → Embedding → Similarity Search → Context Retrieval → LLM Response
    - Batch article processing
    - Embedding updates and maintenance
 
+## Phase 2: Confidence-Driven Routing
+
+The RAG pipeline implements a four-path execution model based on calibrated confidence scores:
+
+### Confidence Bands & Execution Paths
+
+| Confidence Band | Score Range | Behavior | Latency |
+|---|---|---|---|
+| **High** | >= 0.85 | Fast path: Base retrieval only, direct generation | Lowest |
+| **Medium** | 0.65-0.84 | Standard path: Conditional reranking via uncertainty gates | Medium |
+| **Low** | 0.45-0.64 | Cautious path: Expanded retrieval + mandatory reranking | Highest |
+| **Insufficient** | < 0.45 | Abstain path: No generation, return error | Fast (early exit) |
+
+### Standard Path Uncertainty Gates
+
+For medium-confidence queries, the system checks numeric gates before deciding whether to rerank:
+
+1. **Score Gap Gate**: If top-1 and top-2 scores differ by < 0.15, invoke reranker
+2. **Top Strength Gate**: If top-1 score < 0.6, invoke reranker
+3. **Conflict Gate**: If contradictory passages detected, invoke reranker
+
+If all gates pass, use base evidence without reranking.
+
+### Configuration
+
+Tunable thresholds in `.env`:
+- `CONFIDENCE_HIGH` (default: 0.85)
+- `CONFIDENCE_MEDIUM` (default: 0.65)
+- `CONFIDENCE_LOW` (default: 0.45)
+- `UNCERTAINTY_SCORE_GAP_THRESHOLD` (default: 0.15)
+- `UNCERTAINTY_MIN_TOP_STRENGTH` (default: 0.6)
+
+### Observability
+
+Telemetry fields track Phase 2 behavior:
+- `execution_path`: Which path was taken (fast/standard/cautious/abstain)
+- `confidence_band`: Which confidence band triggered routing
+- `reranker_invoked`: Whether reranker was called
+- `reranker_reason`: Why (score_gap, weak_evidence, conflict, cautious_path_mandatory)
+- `tokens_generated`/`tokens_total`: Token usage by path
+
+## Migrations
+
+For existing databases, run migrations manually:
+
+```bash
+# Add content_hash for duplicate detection
+docker exec -i article_index-db psql -U article_index -d article_index \
+  < migrations/001_add_content_hash.sql
+```
+
 ## Performance Optimization
 
 After adding data, create vector indexes for better performance:
@@ -150,6 +228,7 @@ docker exec -it article_index_db_1 psql -U articles -d articles
 - Check API health: `GET /health`
 - Monitor database stats: `GET /stats`
 - Worker health: Celery provides built-in monitoring
+- **Flower**: Celery dashboard at `http://localhost:5555` (queue health, tasks, workers)
 
 ## Troubleshooting
 
@@ -176,14 +255,9 @@ docker exec -it article_index_db_1 psql -U articles -d articles
 ### Logs
 
 ```bash
-# API logs
-docker logs article_index_api_1
-
-# Worker logs
-docker logs article_index_worker_1
-
-# Database logs
-docker logs article_index_db_1
+docker logs article_index-api
+docker logs article_index-worker
+docker logs article_index-db
 ```
 
 ## Development
@@ -197,10 +271,16 @@ docker logs article_index_db_1
 ### Testing
 
 ```bash
-# Run tests (add test suite)
-python -m pytest tests/
+pip install -r requirements-dev.txt
 
-# Manual testing with curl scripts
+# Integration tests (requires running stack + Ollama)
+make test
+# or: API_BASE=http://localhost:8001 pytest tests/ -v -m integration
+
+# Smoke test
+make smoke
+
+# Manual testing
 bash test_api.sh
 ```
 

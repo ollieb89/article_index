@@ -11,11 +11,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Celery configuration
+broker_url = os.getenv(
+    "CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://localhost:6379/0")
+)
+backend_url = os.getenv(
+    "CELERY_RESULT_BACKEND", os.getenv("REDIS_URL", "redis://localhost:6379/1")
+)
+
 celery_app = Celery(
-    'article_worker',
-    broker=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
-    backend=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
-    include=['tasks']
+    "article_worker",
+    broker=broker_url,
+    backend=backend_url,
+    include=["tasks"],
 )
 
 celery_app.conf.update(

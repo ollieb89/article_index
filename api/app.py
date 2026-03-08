@@ -1398,6 +1398,48 @@ async def reindex_article(
         raise HTTPException(status_code=500, detail=f"Failed to schedule reindex: {str(e)}")
 
 
+@app.post("/admin/policy/reload")
+async def reload_policy_from_db(
+    _: None = Depends(require_api_key),
+):
+    """
+    Reload the active policy from database into app.state.
+    
+    Called after calibration script updates the policy registry.
+    Allows new thresholds to take effect without server restart.
+    
+    Returns:
+        {
+            "status": "ok",
+            "reloaded_version": "v42-calibrated",
+            "thresholds": {...}
+        }
+    """
+    try:
+        from shared.database import PolicyRepository
+        
+        policy_repo_inst = PolicyRepository(db_manager)
+        active_policy = await policy_repo_inst.get_active_policy()
+        
+        if not active_policy:
+            raise HTTPException(status_code=404, detail="No active policy found in registry")
+        
+        # Load policy into app.state
+        app.state.active_policy = active_policy
+        
+        logger.info(f"Policy reloaded: version={active_policy.get('version')}")
+        
+        return {
+            "status": "ok",
+            "reloaded_version": active_policy.get("version"),
+            "thresholds": active_policy.get("thresholds", {})
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Policy reload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Policy reload failed: {str(e)}")
+
 @app.post("/admin/models/check")
 async def check_models(
     _: None = Depends(require_api_key),

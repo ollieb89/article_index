@@ -29,6 +29,7 @@ from .query_classifier import QueryClassifier, QueryType
 from .evidence_shape import EvidenceShapeExtractor
 from .retrieval_state import RetrievalStateLabeler, RetrievalState
 from .routing import ContextualRouter, RoutingContext
+from .uncertainty_gates import UncertaintyDetector
 
 from auth import require_api_key
 from shared.url_ingestion import fetch_url_text
@@ -153,6 +154,23 @@ When referencing information, cite the source using [number] format.
 
 Answer:"""
 
+# Phase 2: Medium confidence prompt with light hedging
+RAG_MEDIUM_CONFIDENCE_PROMPT = """You are a helpful assistant. Answer the question based primarily on the provided context.
+
+**Guidelines:**
+- Base your answer on the retrieved sources
+- Acknowledge when evidence is from multiple sources or comes from different perspectives
+- Use phrases like "Based on the available sources..." or "The material suggests..."
+- When evidence is limited, indicate the constraint
+- Cite sources where appropriate
+
+Context:
+{context}
+
+Question: {question}
+
+Answer:"""
+
 # Phase 11: Conservative prompt for LOW confidence
 RAG_CONSERVATIVE_PROMPT_TEMPLATE = """You are a highly cautious assistant. 
 Answer the question using ONLY the provided context. 
@@ -199,6 +217,10 @@ async def lifespan(app: FastAPI):
     app.state.evidence_shape_extractor = EvidenceShapeExtractor()
     app.state.retrieval_state_labeler = RetrievalStateLabeler()
     app.state.contextual_router = ContextualRouter()
+    
+    # Phase 2: Uncertainty detector for confidence routing
+    app.state.uncertainty_detector = UncertaintyDetector()
+    logger.info("Uncertainty detector initialized for Phase 2 confidence routing")
 
     await ollama_client.initialize()
     
@@ -988,6 +1010,38 @@ async def _rag_vector_only(query: RAGQuery) -> Dict[str, Any]:
     }
 
 
+def build_abstention_response(
+    confidence_score: float,
+    confidence_band: str = "insufficient",
+    retrieval_attempted: bool = True,
+    suggestion: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Build Phase 2-compliant abstention response.
+    
+    Returns structured response with status field for reliable client detection.
+    
+    Args:
+        confidence_score: Raw confidence score (0-1)
+        confidence_band: Which band triggered abstention
+        retrieval_attempted: Whether retrieval was performed
+        suggestion: Optional suggestion for query refinement
+        
+    Returns:
+        Dict with status, message, and metadata fields
+    """
+    return {
+        "status": "insufficient_evidence",
+        "confidence_band": confidence_band,
+        "message": "I don't have enough reliable evidence in the retrieved material to answer that confidently.",
+        "metadata": {
+            "confidence_score": round(confidence_score, 3),
+            "retrieval_attempted": retrieval_attempted,
+            "suggestion": suggestion or "Try rephrasing your question or providing more context."
+        }
+    }
+
+
 async def log_policy_telemetry(trace: PolicyTrace):
     """Background task to log policy telemetry to database."""
     try:
@@ -1079,9 +1133,11 @@ async def _rag_hybrid(query: RAGQuery, request: Request, background_tasks: Optio
     trace.retrieval_state = retrieval_state.value if hasattr(retrieval_state, 'value') else str(retrieval_state)
     trace.evidence_shape = evidence_shape.to_dict() if evidence_shape else {}
     
-    # Stage 3: Contextual Routing (Phase 14)
-    # Get latency budget from policy
+    # Stage 3: Confidence-Driven Routing (Phase 2)
+    
+    # Phase 2: Use route_with_confidence() for confidence-based execution paths
     latency_budget = policy.get_latency_budget(qtype_str)
+    uncertainty_detector = getattr(request.app.state, 'uncertainty_detector', None)
     
     routing_ctx = RoutingContext(
         query_type=qtype_str,
@@ -1091,87 +1147,118 @@ async def _rag_hybrid(query: RAGQuery, request: Request, background_tasks: Optio
         policy=policy
     )
     
-    route = router.route(routing_ctx) if router else None
+    # Use Phase 2 confidence-aware routing with uncertainty gates
+    route = None
+    if router and hasattr(router, 'route_with_confidence'):
+        # Use new Phase 2 routing with uncertainty gates
+        route = await router.route_with_confidence(
+            routing_ctx,
+            chunks,
+            evidence_shape,
+            uncertainty_detector
+        )
+    elif router:
+        # Fallback to existing router
+        route = router.route(routing_ctx)
+    
     action = route.action if route else policy.get_action(band, qtype_str)
     execution_path = route.execution_path if route else "standard"
     
-    logger.info(f"Route selected: {action} via {execution_path} (Reason: {route.reason if route else 'policy default'})")
+    logger.info(f"Phase 2 routing: {band} → {execution_path} ({action})")
+    
+    trace.retrieval_depth = len(chunks)
     trace.action_taken = action
     trace.execution_path = execution_path
     
-    if action == "expanded_retrieval" or action == "query_transformation":
-        logger.info(f"Adaptive action '{action}' triggered for band {band}")
-        control_actions.append(action)
+    # Stage 4: Phase 2 Execution Path Logic
+    
+    if execution_path == "abstain":
+        # Immediate abstention (band == insufficient)
+        trace.abstention_triggered = True
+        trace.latency_ms = int((time.time() - start_time) * 1000)
+        if background_tasks:
+            background_tasks.add_task(log_policy_telemetry, trace)
+        return build_abstention_response(confidence.score, band)
+    
+    elif execution_path == "fast":
+        # Fast path: no reranking, no expansion - use base retrieval only
+        logger.debug("Fast path: using base retrieval only, skipping reranking/expansion")
+        # Continue to generation (no additional processing)
+        pass
+    
+    elif execution_path == "standard":
+        # Standard path: conditional reranking based on uncertainty gates
+        if action == "conditional_reranking":
+            logger.info("Standard path: invoking reranker due to uncertainty gates")
+            reranker = getattr(request.app.state, 'reranker', None)
+            if reranker and reranker.policy.mode != RerankMode.OFF:
+                chunks, _ = await reranker.rerank_with_decision(query.question, embedding)
+                trace.reranker_invoked = True
+                trace.reranker_reason = "uncertainty_gates_triggered"
+                control_actions.append("reranking")
+                
+                # Re-score after reranking
+                confidence = evidence_scorer.score_evidence(
+                    chunks, query.question, query_type=qtype_str, policy=policy
+                )
+                band = confidence.band
+                trace.confidence_band = band
+        else:
+            logger.debug("Standard path: uncertainty gates passed, using base evidence")
+    
+    elif execution_path == "cautious":
+        # Cautious path: mandatory reranking + expanded retrieval
+        logger.info("Cautious path: expanded retrieval + mandatory reranking")
         
-        # Use query transformation if available
+        # Query expansion
         query_transformer = getattr(request.app.state, 'query_transformer', None)
         if query_transformer and query_transformer.mode != TransformMode.OFF:
-            chunks, transform_decision, _ = await retriever.retrieve_with_transform(
+            chunks, _, _ = await retriever.retrieve_with_transform(
                 query=query.question,
                 query_transformer=query_transformer,
                 query_embedding=embedding,
                 k=query.context_limit,
                 latency_budget_ms=latency_budget
             )
-            # Re-score after expansion
-            confidence = evidence_scorer.score_evidence(
-                chunks, 
-                query.question, 
-                query_type=qtype_str,
-                policy=policy
-            )
-            band = confidence.band
-            control_actions.append("query_transformation")
-
-    elif action == "rerank_only" or action == "reranking":
+            control_actions.append("query_expansion")
+            logger.debug("Cautious path: query expansion completed")
+        
+        # Mandatory reranking
         reranker = getattr(request.app.state, 'reranker', None)
         if reranker and reranker.policy.mode != RerankMode.OFF:
             chunks, _ = await reranker.rerank_with_decision(query.question, embedding)
-            # Re-score after rerank
-            confidence = evidence_scorer.score_evidence(
-                chunks, 
-                query.question, 
-                query_type=qtype_str,
-                policy=policy
-            )
-            band = confidence.band
+            trace.reranker_invoked = True
+            trace.reranker_reason = "cautious_path_mandatory"
             control_actions.append("reranking")
-
-    # INSUFFICIENT -> Explicit Abstention
-    if band == "insufficient" or action == "abstain":
-        logger.info(f"Policy dictated ABSTAIN for band {band}")
-        execution_path = "abstention"
-        trace.execution_path = execution_path
-        trace.latency_ms = int((time.time() - start_time) * 1000)
+            logger.debug("Cautious path: mandatory reranking completed")
         
-        if background_tasks:
-            background_tasks.add_task(log_policy_telemetry, trace)
-            
-        return {
-            "question": query.question,
-            "answer": RAG_ABSTAIN_RESPONSE,
-            "confidence": confidence.to_dict(),
-            "control_actions": control_actions + ["abstention"],
-            "execution_path": execution_path,
-            "policy_version": policy.version,
-            "sources": [c.get('document_id') for c in chunks],
-            "hybrid_search": True
-        }
-
-    # Stage 4: Generation with band-specific prompt
+        # Re-score after all processing
+        confidence = evidence_scorer.score_evidence(
+            chunks, query.question, query_type=qtype_str, policy=policy
+        )
+        band = confidence.band
+        trace.confidence_band = band
+    
+    # Stage 5: Generation with band-specific prompt
     try:
         context_result = builder.build_context(chunks, query.question)
         
-        # Select prompt variant
-        if band == "low" or action == "conservative_prompt":
-            logger.info(f"Conservative generation triggered")
-            prompt_template = RAG_CONSERVATIVE_PROMPT_TEMPLATE
-            control_actions.append("conservative_prompt")
-            execution_path = "conservative_generation"
-        else:
+        # Select prompt template based on execution path and confidence band
+        if execution_path == "fast" or band == "high":
+            logger.info("High confidence: using direct generation prompt")
             prompt_template = RAG_PROMPT_TEMPLATE
-            if execution_path == "standard":
-                execution_path = "standard_generation"
+            execution_path = "fast_generation"
+        elif execution_path == "standard" or band == "medium":
+            logger.info("Medium confidence: using hedged generation prompt")
+            prompt_template = RAG_MEDIUM_CONFIDENCE_PROMPT
+            execution_path = "standard_generation"
+        elif execution_path == "cautious" or band == "low":
+            logger.info("Low confidence: using conservative generation prompt")
+            prompt_template = RAG_CONSERVATIVE_PROMPT_TEMPLATE
+            execution_path = "cautious_generation"
+        else:
+            logger.debug(f"Unknown path {execution_path}, using default template")
+            prompt_template = RAG_PROMPT_TEMPLATE
             
         prompt = prompt_template.format(
             context=context_result['context'],

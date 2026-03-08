@@ -5,12 +5,65 @@ managing versioned control parameters like confidence thresholds and
 routing rules.
 """
 
+import hashlib
+import json
 import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from shared.evidence_scorer import ConfidenceBand
 
 logger = logging.getLogger(__name__)
+
+
+def compute_policy_hash(content: Dict) -> str:
+    """Compute SHA-256 hash of policy content for immutability verification.
+    
+    Uses canonical JSON format (sorted keys, tight spacing) for determinism.
+    
+    Args:
+        content: Policy content dictionary
+        
+    Returns:
+        Hash string in format "sha256:<hexdigest>"
+    """
+    canonical = json.dumps(content, sort_keys=True, separators=(',', ':'))
+    hexdigest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    return f"sha256:{hexdigest}"
+
+
+def validate_policy_schema(content: Dict) -> List[str]:
+    """Validate policy schema completeness and correctness.
+    
+    Args:
+        content: Policy content dictionary
+        
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    errors = []
+    
+    # Check required sections
+    if 'thresholds' not in content:
+        errors.append("Missing required section: thresholds")
+    else:
+        thresholds = content['thresholds']
+        # Validate threshold ranges (0-1)
+        for band, value in thresholds.items():
+            if not isinstance(value, (int, float)):
+                errors.append(f"Threshold '{band}' must be a number")
+            elif value < 0 or value > 1:
+                errors.append(f"Threshold '{band}' must be between 0 and 1, got {value}")
+    
+    if 'routing_rules' not in content:
+        errors.append("Missing required section: routing_rules")
+    
+    # Check routing map completeness (should have entries for all confidence bands)
+    if 'routing_rules' in content:
+        routing_rules = content['routing_rules']
+        if 'query_types' not in routing_rules:
+            errors.append("Missing routing_rules.query_types")
+    
+    return errors
 
 @dataclass
 class RAGPolicy:

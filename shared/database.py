@@ -473,9 +473,11 @@ class PolicyRepository:
                     query_id, query_text, query_type, confidence_score,
                     confidence_band, action_taken, execution_path,
                     retrieval_state, policy_version, retrieval_mode, 
-                    chunks_retrieved, latency_ms, evidence_shape, metadata
+                    chunks_retrieved, latency_ms, evidence_shape, metadata,
+                    policy_hash, telemetry_schema_version, retrieval_items, retrieval_parameters
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb,
+                    $15, $16, $17::jsonb, $18::jsonb
                 )
                 RETURNING query_id
             """
@@ -494,7 +496,11 @@ class PolicyRepository:
                 trace_data.get('chunks_retrieved'),
                 trace_data.get('latency_ms'),
                 json.dumps(trace_data.get('evidence_shape', {})),
-                json.dumps(trace_data.get('metadata', {}))
+                json.dumps(trace_data.get('metadata', {})),
+                trace_data.get('policy_hash'),  # Phase 4: Policy hash for replay
+                trace_data.get('telemetry_schema_version', '1.0'),  # Phase 4: Schema version
+                json.dumps(trace_data.get('retrieval_items', {})),  # Phase 4: Frozen retrieval snapshot
+                json.dumps(trace_data.get('retrieval_parameters', {}))  # Phase 4: Retrieval params
             )
             return result['query_id'] if result else None
 
@@ -526,7 +532,6 @@ class PolicyRepository:
         except Exception as e:
             logger.error(f"Failed to get route distribution: {e}")
             return []
-            return str(result['query_id'])
 
     async def update_telemetry_outcome(
         self,
@@ -638,6 +643,227 @@ class PolicyRepository:
         except Exception as e:
             logger.error(f"Failed to activate policy {version}: {e}")
             return False
+
+    async def create_policy_with_hash(
+        self,
+        version: str,
+        thresholds: Dict[str, float],
+        routing_rules: Dict[str, Any] = None,
+        contextual_thresholds: Dict[str, Any] = None,
+        latency_budgets: Dict[str, int] = None,
+        policy_hash: str = None
+    ) -> Tuple[bool, str]:
+        """
+        Insert a new policy version with hash into the policy_registry.
+        
+        Args:
+            version: Semantic version identifier (e.g., "v42", "v14.0-calibrated")
+            thresholds: Confidence thresholds dict
+            routing_rules: Optional routing rules JSONB
+            contextual_thresholds: Optional contextual overrides
+            latency_budgets: Optional per-query-type latency budgets
+            policy_hash: SHA-256 hash of policy content (computed if not provided)
+        
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # Compute hash if not provided
+            if policy_hash is None:
+                from shared.policy import compute_policy_hash
+                content = {
+                    'version': version,
+                    'thresholds': thresholds,
+                    'routing_rules': routing_rules or {},
+                    'contextual_thresholds': contextual_thresholds or {},
+                    'latency_budgets': latency_budgets or {}
+                }
+                policy_hash = compute_policy_hash(content)
+            
+            async with self.db.get_async_connection_context() as conn:
+                query = """
+                    INSERT INTO intelligence.policy_registry 
+                    (version, is_active, thresholds, routing_rules, contextual_thresholds, 
+                     latency_budgets, policy_hash, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+                    ON CONFLICT (version) DO NOTHING
+                """
+                result = await conn.execute(
+                    query,
+                    version,
+                    False,  # New policies default to inactive
+                    json.dumps(thresholds),
+                    json.dumps(routing_rules or {}),
+                    json.dumps(contextual_thresholds or {}),
+                    json.dumps(latency_budgets or {}),
+                    policy_hash
+                )
+                if result == "INSERT 0 1":
+                    return True, f"Policy {version} created successfully"
+                else:
+                    return False, f"Policy {version} already exists"
+        except Exception as e:
+            logger.error(f"Failed to create policy {version}: {e}")
+            return False, f"Error: {str(e)}"
+
+    async def activate_policy(
+        self,
+        version: str,
+        activated_by: str = "admin:system",
+        reason: str = None
+    ) -> Tuple[bool, str]:
+        """
+        Activate a policy with audit history tracking.
+        
+        Uses SERIALIZABLE transaction to ensure atomic activation
+        and prevent race conditions.
+        
+        Args:
+            version: Policy version to activate
+            activated_by: Actor identifier (e.g., "admin:user@example.com", "ci:test")
+            reason: Human-readable reason for activation
+        
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            async with self.db.get_async_connection_context() as conn:
+                # Use SERIALIZABLE for strict consistency
+                await conn.execute("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                
+                try:
+                    # Get current active policy version
+                    current_active = await conn.fetchval(
+                        "SELECT version FROM intelligence.policy_registry WHERE is_active = TRUE LIMIT 1"
+                    )
+                    
+                    # Deactivate all policies
+                    await conn.execute(
+                        "UPDATE intelligence.policy_registry SET is_active = false, updated_at = NOW()"
+                    )
+                    
+                    # Activate target policy
+                    result = await conn.execute(
+                        "UPDATE intelligence.policy_registry SET is_active = true, updated_at = NOW() WHERE version = $1",
+                        version
+                    )
+                    
+                    if result != "UPDATE 1":
+                        await conn.execute("ROLLBACK")
+                        return False, f"Policy {version} not found"
+                    
+                    # Deactivate previous activation history entry
+                    if current_active:
+                        await conn.execute(
+                            """UPDATE intelligence.policy_activations 
+                               SET deactivated_at = NOW() 
+                               WHERE policy_version = $1 AND deactivated_at IS NULL""",
+                            current_active
+                        )
+                    
+                    # Record activation in history
+                    await conn.execute(
+                        """INSERT INTO intelligence.policy_activations 
+                           (policy_version, activated_by, reason, prior_policy_version)
+                           VALUES ($1, $2, $3, $4)""",
+                        version, activated_by, reason, current_active
+                    )
+                    
+                    await conn.execute("COMMIT")
+                    
+                    logger.info(f"Activated policy {version} by {activated_by}. Reason: {reason}")
+                    return True, f"Policy {version} activated successfully"
+                    
+                except Exception as e:
+                    await conn.execute("ROLLBACK")
+                    raise e
+                    
+        except Exception as e:
+            logger.error(f"Failed to activate policy {version}: {e}")
+            return False, f"Error: {str(e)}"
+
+    async def rollback_to_previous(self, activated_by: str = "admin:system") -> Tuple[bool, str]:
+        """
+        Rollback to the previously active policy version.
+        
+        Args:
+            activated_by: Actor identifier
+        
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            async with self.db.get_async_connection_context() as conn:
+                # Get the most recent prior policy
+                row = await conn.fetchrow(
+                    """SELECT prior_policy_version 
+                       FROM intelligence.policy_activations 
+                       WHERE deactivated_at IS NOT NULL
+                       ORDER BY deactivated_at DESC LIMIT 1"""
+                )
+                
+                if not row or not row['prior_policy_version']:
+                    return False, "No previous policy version found for rollback"
+                
+                prior_version = row['prior_policy_version']
+                return await self.activate_policy(
+                    prior_version, 
+                    activated_by=activated_by,
+                    reason=f"Rollback from automated/manual trigger"
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to rollback policy: {e}")
+            return False, f"Error: {str(e)}"
+
+    async def get_activation_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get policy activation history with audit trail.
+        
+        Args:
+            limit: Maximum number of history entries to return
+        
+        Returns:
+            List of activation history records
+        """
+        try:
+            async with self.db.get_async_connection_context() as conn:
+                query = """
+                    SELECT 
+                        pa.activation_id,
+                        pa.policy_version,
+                        pa.activated_at,
+                        pa.activated_by,
+                        pa.reason,
+                        pa.deactivated_at,
+                        pa.prior_policy_version,
+                        pr.policy_hash
+                    FROM intelligence.policy_activations pa
+                    LEFT JOIN intelligence.policy_registry pr ON pa.policy_version = pr.version
+                    ORDER BY pa.activated_at DESC
+                    LIMIT $1
+                """
+                rows = await conn.fetch(query, limit)
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get activation history: {e}")
+            return []
+
+    async def get_policy_by_hash(self, policy_hash: str) -> Optional[Dict[str, Any]]:
+        """Get policy by its SHA-256 hash."""
+        try:
+            async with self.db.get_async_connection_context() as conn:
+                query = """
+                    SELECT version, is_active, thresholds, routing_rules, 
+                           contextual_thresholds, latency_budgets, policy_hash, created_at
+                    FROM intelligence.policy_registry
+                    WHERE policy_hash = $1
+                """
+                row = await conn.fetchrow(query, policy_hash)
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get policy by hash: {e}")
+            return None
 
 
 # Global instances

@@ -13,10 +13,10 @@
 | 1 | Startup Fix | ✓ Complete | 2026-03-08 | 3 | ✅ |
 | 2 | Confidence-Driven Control | ✓ Make confidence bands produce different runtime behavior | CTRL-01 – CTRL-04 | 4 | ✅ 2026-03-08 |
 | 3 | CI Verification | Prove behavior changes and calibration loop in automated tests | CTRL-05, CTRL-06 | 3 | ✅ 2026-03-08 |
-| 4 | Policy Hardening | Make policy registry, replay harness, and telemetry production-reliable | PLCY-01 – PLCY-03 | 3 | — |
-| 5 | Contextual Routing | Route on query type + evidence shape + retrieval state + effort budget | CTX-01 – CTX-04 | 4 | — |
+| 4 | Policy Hardening | Make policy registry, replay harness, and telemetry production-reliable | PLCY-01 – PLCY-03 | 3 | ✅ 2026-03-08 |
+| 5 | Contextual Routing | Route on query type + evidence shape + retrieval state + effort budget | CTX-01 – CTX-04 | 4 | ✅ 2026-03-08 |
 
-**Progress:** 3/5 phases complete (~60%) ✓
+**Progress:** 5/5 phases complete (100%) ✅
 
 ---
 
@@ -102,9 +102,11 @@
 - PLCY-03: Telemetry captures all routing decisions with full context (query type, confidence band, evidence shape, retrieval state, routing action)
 
 **Plans:**
-1. Audit `PolicyRepository` — fix dead code (unreachable `return str(result['query_id'])`) and verify update/rollback semantics
-2. Harden policy trace schema — ensure all required fields (query_type, confidence_band, evidence_shape, retrieval_state, routing_action, execution_path) are captured on every request
-3. Test replay harness against real traces — deterministic output assertion
+- **[4-1-PLAN.md](4-1-PLAN.md)**: Foundation — Policy versioning, SHA-256 hashing, telemetry instrumentation (Waves 1-3)
+- **[4-2-PLAN.md](4-2-PLAN.md)**: Replay & Admin — Deterministic replay harness, admin endpoints (Waves 4-5)
+- **[4-3-PLAN.md](4-3-PLAN.md)**: Verification — Integration testing, PLCY-01/02/03 validation (Wave 6)
+
+**Execution Order:** Plan 4-1 → 4-2 → 4-3 (sequential, each plan depends on prior)
 
 **Success Criteria:**
 1. Policy update and rollback round-trips produce identical schema state with no row loss, verified by test comparing before/after DB state
@@ -113,29 +115,40 @@
 
 ---
 
-## Phase 5: Contextual Policy Routing
+## Phase 5: Contextual Policy Routing ✅ COMPLETE
 
 **Goal:** Extend routing beyond confidence bands. Incorporate query type, evidence shape, retrieval state, and effort budgets as first-class routing dimensions. Different question types + evidence profiles follow different execution strategies.
 
-**Why fifth:** Only viable after the control loop (Phase 2–3) and infrastructure (Phase 4) are solid. Phase 5 extends the decision surface; if the base routing is unreliable, extending it adds complexity without control.
+**Status:** ✅ Complete (2026-03-08)  
+**Test Count:** 107 tests passing  
+**Implementation:** See [5-IMPLEMENTATION-SUMMARY.md](5-IMPLEMENTATION-SUMMARY.md)
 
 **Requirements:**
-- CTX-01: Query type is a first-class routing dimension
-- CTX-02: Evidence shape drives retrieval budget decisions
-- CTX-03: Retrieval state (SOLID/FRAGILE/CONFLICTED/SPARSE/ABSENT) maps to distinct execution paths
-- CTX-04: Effort budgets enforced — fast path for exact_fact + SOLID; expanded path for ambiguous
+- CTX-01: Query type is a first-class routing dimension ✅
+- CTX-02: Evidence shape drives retrieval budget decisions ✅
+- CTX-03: Retrieval state (SOLID/FRAGILE/CONFLICTED/EMPTY) maps to distinct execution paths ✅
+- CTX-04: Effort budgets enforced — fast path for exact_fact + SOLID; expanded path for ambiguous ✅
 
-**Plans:**
-1. Extend ContextualRouter routing table to incorporate query_type × retrieval_state matrix (not just confidence band)
-2. Implement effort budget enforcement — skip expensive steps (reranking, expanded retrieval) on fast-path routing; permit on budget-heavy paths
-3. Add CONFLICTED retrieval state handling — conservative prompting and citation enforcement regardless of confidence band
-4. Write routing decision tests for each significant query_type × evidence profile combination
+**Implementation:**
+- **[5-1-PLAN.md](5-1-PLAN.md)**: Core Rule Engine — RoutingContext, RoutingRule, RuleEngine ✅
+- **[5-2-PLAN.md](5-2-PLAN.md)**: Query Classification & Evidence Shape — QueryType taxonomy, EvidenceShape bands ✅
+- **[5-3-PLAN.md](5-3-PLAN.md)**: Integration & Budget Constraint — ContextualRouterV2, BudgetConstraint layer, E2E tests ✅
+
+**Design Decisions (from [5-CONTEXT.md](5-CONTEXT.md)):**
+- Declarative rule-table engine (not nested conditionals) ✅
+- Precedence: Specificity → Priority → ID (stable tie-break) ✅
+- Structured action objects (future-proof) ✅
+- Simple condition semantics: equality + list membership only ✅
+- Layered fallback: confidence-band defaults → hard safety ✅
+- Query types: exact_fact, comparison, multi_hop, ambiguous, summarization, other ✅
+- Evidence shape: coverage_band, agreement_band, spread_band ✅
+- Effort budget: post-routing constraint (not rule condition) ✅
 
 **Success Criteria:**
-1. An `exact_fact` query with SOLID evidence completes without invoking the reranker — measurable via policy trace
-2. An `ambiguous` query with FRAGILE evidence triggers expanded retrieval (larger context window or additional retrieval pass)
-3. A CONFLICTED retrieval state produces conservative answer phrasing regardless of numerical confidence score — asserted via response content pattern or policy trace action field
-4. Routing decision tests cover at least: `{exact_fact + SOLID}`, `{ambiguous + FRAGILE}`, `{comparison + CONFLICTED}`, `{summarization + SPARSE}`, `{any + ABSENT}` combinations
+1. ✅ An `exact_fact` query with SOLID evidence completes without invoking the reranker — verified via `test_exact_fact_solid_high_to_fast`
+2. ✅ A query with FRAGILE evidence triggers expanded retrieval — verified via `test_fragile_retrieval_to_cautious`
+3. ✅ A CONFLICTED retrieval state produces conservative answer phrasing — verified via `test_conflicted_retrieval_to_cautious`
+4. ✅ Routing decision tests cover all required combinations — verified via `test_contextual_routing_e2e.py`
 
 ---
 

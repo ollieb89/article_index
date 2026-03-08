@@ -28,8 +28,14 @@ from celery.result import AsyncResult
 from .query_classifier import QueryClassifier, QueryType
 from .evidence_shape import EvidenceShapeExtractor
 from .retrieval_state import RetrievalStateLabeler, RetrievalState
-from .routing import ContextualRouter, RoutingContext
+from .routing import ContextualRouter, RoutingContext as LegacyRoutingContext
 from .uncertainty_gates import UncertaintyDetector
+
+# Phase 5 Imports
+from shared.routing_engine import RoutingContext
+from shared.contextual_router_v2 import ContextualRouterV2
+from shared.budget_constraint import BudgetConstraint
+from shared.default_policies import get_phase5_default_policy, validate_policy
 
 from auth import require_api_key
 from shared.url_ingestion import fetch_url_text
@@ -217,6 +223,23 @@ async def lifespan(app: FastAPI):
     app.state.evidence_shape_extractor = EvidenceShapeExtractor()
     app.state.retrieval_state_labeler = RetrievalStateLabeler()
     app.state.contextual_router = ContextualRouter()
+    
+    # Phase 5: Contextual Router V2 and Budget Constraint
+    try:
+        # Try to use active policy for Phase 5 router
+        if hasattr(app.state, 'active_policy') and app.state.active_policy:
+            app.state.contextual_router_v2 = ContextualRouterV2(app.state.active_policy)
+        else:
+            # Use default Phase 5 policy
+            from shared.default_policies import MockPolicy
+            app.state.contextual_router_v2 = ContextualRouterV2(MockPolicy(get_phase5_default_policy()))
+        
+        app.state.budget_constraint = BudgetConstraint()
+        logger.info("Phase 5 contextual routing initialized")
+    except Exception as e:
+        logger.warning(f"Phase 5 router initialization failed: {e}")
+        app.state.contextual_router_v2 = None
+        app.state.budget_constraint = None
     
     # Phase 2: Uncertainty detector for confidence routing
     app.state.uncertainty_detector = UncertaintyDetector()
@@ -1058,7 +1081,15 @@ async def _rag_hybrid(query: RAGQuery, request: Request, background_tasks: Optio
     retriever: HybridRetriever = request.app.state.hybrid_retriever
     builder: ContextBuilder = request.app.state.context_builder
     evidence_scorer: EvidenceScorer = request.app.state.evidence_scorer
+    
+    # Phase 4: Capture policy snapshot at request start for immutability
     policy: RAGPolicy = getattr(request.app.state, 'active_policy', RAGPolicy(version="inline-default"))
+    policy_version = policy.version
+    policy_hash = None
+    if hasattr(policy, 'to_dict'):
+        from shared.policy import compute_policy_hash
+        policy_hash = compute_policy_hash(policy.to_dict())
+    
     ollama = OllamaClient()
     
     # Milestone 1: Query Classification
@@ -1071,11 +1102,13 @@ async def _rag_hybrid(query: RAGQuery, request: Request, background_tasks: Optio
     # Accumulated control actions for telemetry
     control_actions: list = []
 
-    # Initialize Trace
+    # Initialize Trace with policy snapshot
     trace = PolicyTrace(
         query_text=query.question,
         query_type=qtype_str,
-        policy_version=policy.version
+        policy_version=policy_version,
+        policy_hash=policy_hash,
+        telemetry_schema_version="1.0"
     )
     
     # Stage 1: Initial Retrieval
@@ -1094,6 +1127,24 @@ async def _rag_hybrid(query: RAGQuery, request: Request, background_tasks: Optio
     except Exception as e:
         logger.error(f"Retrieval failed: {e}")
         raise HTTPException(status_code=500, detail="Search failed")
+    
+    # Phase 4: Capture frozen retrieval snapshot for deterministic replay
+    retrieval_items = []
+    for rank, chunk in enumerate(chunks):
+        retrieval_items.append({
+            'id': chunk.get('id'),
+            'rank': rank + 1,
+            'score': chunk.get('final_score', chunk.get('score', 0.0)),
+            'source_doc': chunk.get('document_id'),
+            'chunk_index': chunk.get('chunk_index', 0)
+        })
+    
+    trace.retrieval_items = retrieval_items
+    trace.retrieval_parameters = {
+        'limit': query.context_limit,
+        'threshold': query.similarity_threshold,
+        'mode': 'hybrid'
+    }
     
     if not chunks:
         trace.confidence_band = "insufficient"
@@ -2476,6 +2527,372 @@ async def check_groundedness(
     except Exception as e:
         logger.error(f"Groundedness check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Check failed: {str(e)}")
+
+
+# ============================================================================
+# Phase 4: Policy Infrastructure Hardening - Admin Endpoints
+# ============================================================================
+
+@app.post("/admin/policy/create")
+async def admin_create_policy(
+    version: str,
+    content: Dict[str, Any],
+    _: None = Depends(require_api_key),
+):
+    """Create a new policy version with SHA-256 hash.
+    
+    Args:
+        version: Semantic version identifier (e.g., "v2.1")
+        content: Policy content dict with thresholds, routing_rules, etc.
+    
+    Returns:
+        Dict with success status and policy hash
+    """
+    try:
+        from shared.policy import validate_policy_schema, compute_policy_hash
+        
+        # Validate schema
+        errors = validate_policy_schema(content)
+        if errors:
+            raise HTTPException(status_code=400, detail=f"Schema validation failed: {'; '.join(errors)}")
+        
+        # Compute hash
+        content['version'] = version
+        policy_hash = compute_policy_hash(content)
+        
+        # Create policy
+        success, message = await policy_repo.create_policy_with_hash(
+            version=version,
+            thresholds=content.get('thresholds', {}),
+            routing_rules=content.get('routing_rules'),
+            contextual_thresholds=content.get('contextual_thresholds'),
+            latency_budgets=content.get('latency_budgets'),
+            policy_hash=policy_hash
+        )
+        
+        if not success:
+            raise HTTPException(status_code=409, detail=message)
+        
+        return {
+            "status": "created",
+            "version": version,
+            "policy_hash": policy_hash,
+            "message": message
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Policy creation failed: {str(e)}")
+
+
+@app.post("/admin/policy/activate")
+async def admin_activate_policy(
+    version: str,
+    reason: Optional[str] = None,
+    _: None = Depends(require_api_key),
+):
+    """Activate a policy version with audit history.
+    
+    Args:
+        version: Policy version to activate
+        reason: Human-readable reason for activation
+    
+    Returns:
+        Dict with success status
+    """
+    try:
+        success, message = await policy_repo.activate_policy(
+            version=version,
+            activated_by="admin:api",
+            reason=reason
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+        
+        # Reload policy in app.state
+        active_policy = await policy_repo.get_active_policy()
+        if active_policy:
+            from shared.policy import RAGPolicy
+            app.state.active_policy = RAGPolicy.from_db_row(active_policy)
+        
+        return {
+            "status": "activated",
+            "version": version,
+            "reason": reason,
+            "message": message
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to activate policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Policy activation failed: {str(e)}")
+
+
+@app.post("/admin/policy/rollback")
+async def admin_rollback_policy(
+    _: None = Depends(require_api_key),
+):
+    """Rollback to the previously active policy version.
+    
+    Returns:
+        Dict with success status and rolled-back version
+    """
+    try:
+        success, message = await policy_repo.rollback_to_previous(
+            activated_by="admin:api"
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+        
+        # Reload policy in app.state
+        active_policy = await policy_repo.get_active_policy()
+        if active_policy:
+            from shared.policy import RAGPolicy
+            app.state.active_policy = RAGPolicy.from_db_row(active_policy)
+        
+        return {
+            "status": "rolled_back",
+            "active_version": active_policy.get('version') if active_policy else None,
+            "message": message
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to rollback policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Policy rollback failed: {str(e)}")
+
+
+@app.get("/admin/policy/history")
+async def admin_get_policy_history(
+    limit: int = 10,
+    _: None = Depends(require_api_key),
+):
+    """Get policy activation history with audit trail.
+    
+    Args:
+        limit: Maximum number of history entries
+    
+    Returns:
+        List of activation history records
+    """
+    try:
+        history = await policy_repo.get_activation_history(limit=limit)
+        return {
+            "history": history,
+            "count": len(history)
+        }
+    except Exception as e:
+        logger.error(f"Failed to get policy history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get history: {str(e)}")
+
+
+@app.get("/admin/policy/list")
+async def admin_list_policies(
+    limit: int = 10,
+    _: None = Depends(require_api_key),
+):
+    """List all policies in the registry.
+    
+    Args:
+        limit: Maximum number of policies to return
+    
+    Returns:
+        List of policy records
+    """
+    try:
+        policies = await policy_repo.list_policies(limit=limit)
+        return {
+            "policies": policies,
+            "count": len(policies)
+        }
+    except Exception as e:
+        logger.error(f"Failed to list policies: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list policies: {str(e)}")
+
+
+@app.get("/admin/policy/status")
+async def admin_get_policy_status():
+    """Get current policy status (no auth required).
+    
+    Returns:
+        Dict with active policy info and telemetry stats
+    """
+    try:
+        active_policy = await policy_repo.get_active_policy()
+        policies = await policy_repo.list_policies(limit=100)
+        recent_telemetry = await policy_repo.get_recent_telemetry(limit=1)
+        history = await policy_repo.get_activation_history(limit=5)
+        
+        # Get schema version distribution
+        from shared.database import db_manager
+        async with db_manager.get_async_connection_context() as conn:
+            version_rows = await conn.fetch(
+                """SELECT telemetry_schema_version, COUNT(*) as count 
+                   FROM intelligence.policy_telemetry 
+                   GROUP BY telemetry_schema_version"""
+            )
+            schema_versions = {r['telemetry_schema_version']: r['count'] for r in version_rows}
+        
+        return {
+            "active_policy_version": active_policy.get('version') if active_policy else None,
+            "active_policy_hash": active_policy.get('policy_hash') if active_policy else None,
+            "policy_count": len(policies),
+            "telemetry_stats": {
+                "total_traces": sum(schema_versions.values()),
+                "schema_versions": schema_versions
+            },
+            "trace_schema_versions": schema_versions,
+            "last_activation": history[0] if history else None,
+            "activation_history_count": len(history)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get policy status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+
+@app.post("/admin/replay/audit")
+async def admin_replay_audit(
+    trace_id: str,
+    _: None = Depends(require_api_key),
+):
+    """Replay audit for a single trace.
+    
+    Args:
+        trace_id: UUID of the telemetry trace to replay
+    
+    Returns:
+        Dict with replay status and decision comparison
+    """
+    try:
+        from shared.replay import DeterministicReplayer
+        
+        replayer = DeterministicReplayer(policy_repo)
+        result = await replayer.replay_audit(trace_id)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Replay audit failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Replay audit failed: {str(e)}")
+
+
+@app.post("/admin/replay/batch")
+async def admin_replay_batch(
+    limit: int = 50,
+    _: None = Depends(require_api_key),
+):
+    """Batch replay recent traces for regression testing.
+    
+    Args:
+        limit: Maximum number of traces to replay
+    
+    Returns:
+        Dict with aggregate replay results
+    """
+    try:
+        from shared.replay import DeterministicReplayer
+        
+        replayer = DeterministicReplayer(policy_repo)
+        result = await replayer.replay_batch(limit=limit)
+        
+        # Return 400 if any failures for CI integration
+        if result.get('failed', 0) > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=result
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch replay failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch replay failed: {str(e)}")
+
+
+@app.post("/admin/policy/validate")
+async def validate_policy_endpoint(
+    policy: Dict[str, Any],
+    _: None = Depends(require_api_key),
+):
+    """Validate a Phase 5 policy JSON.
+    
+    Accepts policy JSON and returns validation result with errors and warnings.
+    
+    Args:
+        policy: Policy dictionary to validate
+        
+    Returns:
+        {
+            "valid": true/false,
+            "errors": ["error messages"],
+            "warnings": ["warning messages"],
+            "rule_count": 6,
+            "enabled_rule_count": 6
+        }
+    """
+    try:
+        result = validate_policy(policy)
+        return result
+    except Exception as e:
+        logger.error(f"Policy validation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Policy validation failed: {str(e)}")
+
+
+@app.get("/admin/routing/status")
+async def get_routing_status(
+    _: None = Depends(require_api_key),
+):
+    """Get Phase 5 contextual routing status.
+    
+    Returns information about the current routing configuration.
+    """
+    try:
+        status = {
+            "phase5_enabled": False,
+            "router_v2_loaded": False,
+            "budget_constraint_loaded": False,
+            "rule_count": 0,
+            "enabled_rule_count": 0
+        }
+        
+        # Check if Phase 5 components are loaded
+        if hasattr(app.state, 'contextual_router_v2') and app.state.contextual_router_v2:
+            status["phase5_enabled"] = True
+            status["router_v2_loaded"] = True
+            
+            router = app.state.contextual_router_v2
+            rules = router.list_rules(include_disabled=True)
+            enabled_rules = router.list_rules(include_disabled=False)
+            
+            status["rule_count"] = len(rules)
+            status["enabled_rule_count"] = len(enabled_rules)
+            
+            # Get policy version
+            if hasattr(router, 'policy'):
+                status["policy_version"] = getattr(router.policy, 'policy_version', 'unknown')
+        
+        if hasattr(app.state, 'budget_constraint') and app.state.budget_constraint:
+            status["budget_constraint_loaded"] = True
+            
+            # Get budget levels
+            constraint = app.state.budget_constraint
+            if hasattr(constraint, 'budget_levels'):
+                status["budget_levels"] = constraint.budget_levels
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Failed to get routing status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get routing status: {str(e)}")
 
 
 if __name__ == "__main__":

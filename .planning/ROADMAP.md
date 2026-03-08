@@ -8,15 +8,15 @@
 
 ## Overview
 
-| # | Phase | Goal | Requirements | Success Criteria |
-|---|-------|------|--------------|-----------------|
-| 1 | Startup Fix | Complete    | 2026-03-08 | 3 |
-| 2 | Confidence-Driven Control | Make confidence bands produce different runtime behavior | CTRL-01 – CTRL-04 | 4 |
-| 3 | CI Verification | Prove behavior changes and calibration loop in automated tests | CTRL-05, CTRL-06 | 3 |
-| 4 | Policy Hardening | Make policy registry, replay harness, and telemetry production-reliable | PLCY-01 – PLCY-03 | 3 |
-| 5 | Contextual Routing | Route on query type + evidence shape + retrieval state + effort budget | CTX-01 – CTX-04 | 4 |
+| # | Phase | Goal | Requirements | Success Criteria | Status |
+|---|-------|------|--------------|-----------------|--------|
+| 1 | Startup Fix | ✓ Complete | 2026-03-08 | 3 | ✅ |
+| 2 | Confidence-Driven Control | ✓ Make confidence bands produce different runtime behavior | CTRL-01 – CTRL-04 | 4 | ✅ 2026-03-08 |
+| 3 | CI Verification | Prove behavior changes and calibration loop in automated tests | CTRL-05, CTRL-06 | 3 | — |
+| 4 | Policy Hardening | Make policy registry, replay harness, and telemetry production-reliable | PLCY-01 – PLCY-03 | 3 | — |
+| 5 | Contextual Routing | Route on query type + evidence shape + retrieval state + effort budget | CTX-01 – CTX-04 | 4 | — |
 
-**15 requirements mapped across 5 phases. Full v1 coverage ✓**
+**Progress:** 2/5 phases complete (~40%) ✓
 
 ---
 

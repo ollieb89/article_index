@@ -11,10 +11,14 @@ Requirement Coverage:
 
 import pytest
 import json
+import logging
 from typing import Dict, Any
 
 # Import fixtures from conftest
 from conftest import make_ci_headers, assert_execution_path, assert_confidence_band
+
+logger = logging.getLogger(__name__)
+
 
 
 @pytest.mark.integration
@@ -249,24 +253,140 @@ class TestPolicyReload:
         """
         CTRL-06: Policy reload changes routing thresholds without restart.
         
-        Steps:
-        1. Query with confidence 0.75 (lenient policy: high, baseline: medium)
-        2. Reload strict policy (0.75 becomes medium)
-        3. Verify routing changes
+        Verifies that the same confidence score (0.75) produces different
+        execution paths when the active policy is switched without restart.
+        
+        GIVEN:
+        - Lenient policy: high_min=0.70, medium_min=0.45, low_min=0.25
+        - Strict policy: high_min=0.95, medium_min=0.75, low_min=0.50
+        
+        WHEN:
+        - Query with confidence=0.75 under lenient policy
+          → 0.75 >= 0.70 (high_min) → confidence_band="high" → execution_path="fast"
+        - Reload strict policy and query with same confidence=0.75
+          → 0.75 >= 0.75 (medium_min) but < 0.95 (high_min) → confidence_band="medium" → execution_path="standard"
+        
+        THEN:
+        - Execution path changes from "fast" to "standard" (proof that CTRL-06 works)
+        - No server restart needed
         """
         import httpx
+        from shared.database import PolicyRepository, db_manager
         
-        # Use lenient policy which treats 0.75 as high confidence
+        policy_repo = PolicyRepository(db_manager)
+        
         async with httpx.AsyncClient() as client:
-            # First, set lenient policy
-            response = await client.post(
+            # ==== STEP 1: Activate lenient policy ====
+            activated = await policy_repo.set_active_policy(policy_seed['lenient'])
+            assert activated, f"Failed to activate lenient policy: {policy_seed['lenient']}"
+            logger.info(f"✓ Activated lenient policy: {policy_seed['lenient']}")
+            
+            # Reload policy into app.state
+            reload_response = await client.post(
                 f"{api_base}/admin/policy/reload",
                 headers=api_headers,
                 timeout=10.0
             )
-            # This would need implementation of setting active policy first
-            # For now, verify the endpoint exists and responds
-            assert response.status_code in [200, 404, 500]  # Accept any response for now
+            assert reload_response.status_code == 200, \
+                f"Policy reload failed: {reload_response.status_code}\n{reload_response.text}"
+            logger.info(f"✓ Reloaded policy: {reload_response.json()}")
+            
+            # ==== STEP 2: Query with 0.75 confidence under LENIENT policy ====
+            # Lenient policy: 0.75 >= 0.70 (high_min) → "high" band → "fast" path
+            headers_lenient = {**api_headers, **make_ci_headers(confidence=0.75)}
+            
+            response_lenient = await client.post(
+                f"{api_base}/rag",
+                json={"question": "What is Python?"},
+                headers=headers_lenient,
+                timeout=10.0
+            )
+            assert response_lenient.status_code == 200, \
+                f"Lenient query failed: {response_lenient.status_code}\n{response_lenient.text}"
+            
+            data_lenient = response_lenient.json()
+            path_lenient = data_lenient.get("execution_path")
+            band_lenient = data_lenient.get("confidence_band")
+            
+            logger.info(f"✓ Lenient policy response:")
+            logger.info(f"  - Confidence: 0.75")
+            logger.info(f"  - Confidence band: {band_lenient}")
+            logger.info(f"  - Execution path: {path_lenient}")
+            
+            # Verify lenient policy routing: 0.75 >= 0.70 → "high" → "fast" or "fast_generation"
+            assert band_lenient == "high", \
+                f"Lenient policy (0.75 >= 0.70): expected band='high', got '{band_lenient}'"
+            assert path_lenient in ["fast", "fast_generation"], \
+                f"Lenient policy (high band): expected path in ['fast', 'fast_generation'], got '{path_lenient}'"
+            
+            # ==== STEP 3: Activate strict policy and reload ====
+            activated = await policy_repo.set_active_policy(policy_seed['strict'])
+            assert activated, f"Failed to activate strict policy: {policy_seed['strict']}"
+            logger.info(f"✓ Activated strict policy: {policy_seed['strict']}")
+            
+            # Reload policy into app.state
+            reload_response = await client.post(
+                f"{api_base}/admin/policy/reload",
+                headers=api_headers,
+                timeout=10.0
+            )
+            assert reload_response.status_code == 200, \
+                f"Policy reload failed: {reload_response.status_code}\n{reload_response.text}"
+            logger.info(f"✓ Reloaded policy: {reload_response.json()}")
+            
+            # ==== STEP 4: Query with SAME confidence (0.75) under STRICT policy ====
+            # Strict policy: 0.75 >= 0.75 (medium_min) but < 0.95 (high_min) → "medium" band → "standard" path
+            response_strict = await client.post(
+                f"{api_base}/rag",
+                json={"question": "What is Python?"},
+                headers=headers_lenient,  # Same headers as before
+                timeout=10.0
+            )
+            assert response_strict.status_code == 200, \
+                f"Strict query failed: {response_strict.status_code}\n{response_strict.text}"
+            
+            data_strict = response_strict.json()
+            path_strict = data_strict.get("execution_path")
+            band_strict = data_strict.get("confidence_band")
+            
+            logger.info(f"✓ Strict policy response:")
+            logger.info(f"  - Confidence: 0.75 (same as before)")
+            logger.info(f"  - Confidence band: {band_strict}")
+            logger.info(f"  - Execution path: {path_strict}")
+            
+            # Verify strict policy routing: 0.75 >= 0.75 (medium_min) and 0.75 < 0.95 (high_min) → "medium" → "standard"
+            assert band_strict == "medium", \
+                f"Strict policy (0.75 >= 0.75, < 0.95): expected band='medium', got '{band_strict}'"
+            assert path_strict in ["standard", "standard_generation"], \
+                f"Strict policy (medium band): expected path in ['standard', 'standard_generation'], got '{path_strict}'"
+            
+            # ==== STEP 5: VERIFY THE CHANGE ====
+            # Same confidence, different policies, different execution paths
+            # This is the proof that CTRL-06 works: calibration changes behavior without restart
+            logger.info(f"\n{'='*60}")
+            logger.info(f"CTRL-06 VERIFICATION RESULTS")
+            logger.info(f"{'='*60}")
+            logger.info(f"Confidence: 0.75 (constant across both queries)")
+            logger.info(f"")
+            logger.info(f"Lenient policy:  {band_lenient:10s} band → {path_lenient:20s} path")
+            logger.info(f"Strict policy:   {band_strict:10s} band → {path_strict:20s} path")
+            logger.info(f"")
+            logger.info(f"Path changed: {path_lenient} → {path_strict}")
+            logger.info(f"Proof: Thresholds control routing, not randomness ✓")
+            logger.info(f"{'='*60}\n")
+            
+            # Assert paths are different (proof that policy reload works)
+            assert path_lenient != path_strict, \
+                f"CTRL-06 FAILED: Same confidence (0.75) produced same path under different policies: {path_lenient}. " \
+                f"This indicates policy reload is not working or thresholds are not being applied."
+            
+            # Verify the change is due to thresholds, not randomness
+            # Lenient should be "faster" (fast) than strict (standard)
+            if "fast" in path_lenient and "standard" in path_strict:
+                logger.info("✓ CTRL-06 verified: Policy reload changes execution path (lenient→fast, strict→standard)")
+            else:
+                logger.info(f"⚠ Paths changed but not in expected direction: {path_lenient} → {path_strict}")
+
     
     
     async def test_policy_reload_endpoint_exists(self, api_base, api_headers):

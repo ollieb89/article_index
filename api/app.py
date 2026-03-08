@@ -1120,18 +1120,65 @@ async def _rag_hybrid(query: RAGQuery, request: Request, background_tasks: Optio
     evidence_shape = shape_extractor.extract(chunks, query.question) if shape_extractor else None
     retrieval_state = state_labeler.label(evidence_shape) if state_labeler else RetrievalState.RECOVERABLE
     
+    # CI override handling (for deterministic testing)
+    ci_confidence_override = None
+    if request.headers.get("X-CI-Test-Mode") == "true":
+        override_header = request.headers.get("X-CI-Override-Confidence")
+        if override_header:
+            try:
+                ci_confidence_override = float(override_header)
+                if not (0.0 <= ci_confidence_override <= 1.0):
+                    logger.warning(f"CI confidence override out of range: {ci_confidence_override}, ignoring")
+                    ci_confidence_override = None
+                else:
+                    logger.debug(f"CI confidence override applied: {ci_confidence_override}")
+            except ValueError:
+                logger.warning(f"Invalid CI confidence override header: {override_header}")
+    
     # Stage 2.1: Confidence Check with Policy
-    confidence = evidence_scorer.score_evidence(
-        chunks, 
-        query.question, 
-        query_type=qtype_str,
-        policy=policy
-    )
-    band = confidence.band
+    if ci_confidence_override is not None:
+        # Use override confidence directly
+        confidence_score = ci_confidence_override
+        # Determine band from override score using policy thresholds
+        thresholds = policy.thresholds if hasattr(policy, 'thresholds') else {}
+        high_min = thresholds.get('high_min', 0.85)
+        medium_min = thresholds.get('medium_min', 0.60)
+        low_min = thresholds.get('low_min', 0.35)
+        
+        if confidence_score >= high_min:
+            confidence_band = "high"
+        elif confidence_score >= medium_min:
+            confidence_band = "medium"
+        elif confidence_score >= low_min:
+            confidence_band = "low"
+        else:
+            confidence_band = "insufficient"
+        
+        # Create confidence object with override
+        from shared.evidence_scorer import ConfidenceScore
+        confidence = ConfidenceScore(
+            score=confidence_score,
+            band=confidence_band,
+            components={},
+            reasoning="CI override"
+        )
+        band = confidence_band
+    else:
+        confidence = evidence_scorer.score_evidence(
+            chunks, 
+            query.question, 
+            query_type=qtype_str,
+            policy=policy
+        )
+        band = confidence.band
     trace.confidence_score = confidence.score
     trace.confidence_band = band
     trace.retrieval_state = retrieval_state.value if hasattr(retrieval_state, 'value') else str(retrieval_state)
     trace.evidence_shape = evidence_shape.to_dict() if evidence_shape else {}
+    
+    # Add CI override to metadata for audit trail
+    if ci_confidence_override is not None:
+        trace.metadata["ci_confidence_override"] = ci_confidence_override
     
     # Stage 3: Confidence-Driven Routing (Phase 2)
     

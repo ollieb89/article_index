@@ -2,15 +2,15 @@
 
 **Project:** Article Index — Control Architecture Milestone
 **Initialized:** 2026-03-08
-**Current Phase:** 03
+**Current Phase:** 04
 
 ## Current Status
 
 | Field | Value |
 |-------|-------|
-| Active Phase | 3: CI Verification |
-| Phase Status | Ready for planning |
-| Last Action | Phase 2 complete — confidence-driven routing implemented and verified |
+| Active Phase | 4: Policy Hardening |
+| Phase Status | Ready to plan |
+| Last Action | Phase 3 complete — CI verification confirms confidence-driven control works |
 | Blocking Issues | None |
 
 ## Phase Progress

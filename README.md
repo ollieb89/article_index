@@ -160,6 +160,47 @@ Query → Embedding → Similarity Search → Context Retrieval → LLM Response
    - Batch article processing
    - Embedding updates and maintenance
 
+## Phase 2: Confidence-Driven Routing
+
+The RAG pipeline implements a four-path execution model based on calibrated confidence scores:
+
+### Confidence Bands & Execution Paths
+
+| Confidence Band | Score Range | Behavior | Latency |
+|---|---|---|---|
+| **High** | >= 0.85 | Fast path: Base retrieval only, direct generation | Lowest |
+| **Medium** | 0.65-0.84 | Standard path: Conditional reranking via uncertainty gates | Medium |
+| **Low** | 0.45-0.64 | Cautious path: Expanded retrieval + mandatory reranking | Highest |
+| **Insufficient** | < 0.45 | Abstain path: No generation, return error | Fast (early exit) |
+
+### Standard Path Uncertainty Gates
+
+For medium-confidence queries, the system checks numeric gates before deciding whether to rerank:
+
+1. **Score Gap Gate**: If top-1 and top-2 scores differ by < 0.15, invoke reranker
+2. **Top Strength Gate**: If top-1 score < 0.6, invoke reranker
+3. **Conflict Gate**: If contradictory passages detected, invoke reranker
+
+If all gates pass, use base evidence without reranking.
+
+### Configuration
+
+Tunable thresholds in `.env`:
+- `CONFIDENCE_HIGH` (default: 0.85)
+- `CONFIDENCE_MEDIUM` (default: 0.65)
+- `CONFIDENCE_LOW` (default: 0.45)
+- `UNCERTAINTY_SCORE_GAP_THRESHOLD` (default: 0.15)
+- `UNCERTAINTY_MIN_TOP_STRENGTH` (default: 0.6)
+
+### Observability
+
+Telemetry fields track Phase 2 behavior:
+- `execution_path`: Which path was taken (fast/standard/cautious/abstain)
+- `confidence_band`: Which confidence band triggered routing
+- `reranker_invoked`: Whether reranker was called
+- `reranker_reason`: Why (score_gap, weak_evidence, conflict, cautious_path_mandatory)
+- `tokens_generated`/`tokens_total`: Token usage by path
+
 ## Migrations
 
 For existing databases, run migrations manually:

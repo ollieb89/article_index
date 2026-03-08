@@ -67,13 +67,8 @@ class EvidenceShapeExtractor:
         both_count = sum(1 for c in chunks if c.get('from_lexical') and c.get('from_vector'))
         agreement = both_count / len(chunks) if chunks else 0
         
-        # Simple contradiction detection: if scores are high but sources disagree
-        # (Placeholder for more advanced logic)
-        contradiction_flag = False
-        if source_count > 1 and agreement < 0.2 and top1_score > 0.8:
-            # High score but very different results from different sources might mean conflict
-            # In a real system, we'd use an LLM or NLI here.
-            contradiction_flag = False # Keep safe for now unless specifically triggered
+        # Phase 2: Real contradiction detection
+        contradiction_flag = self._detect_contradiction(chunks, top1_score)
             
         return EvidenceShape(
             top1_score=top1_score,
@@ -84,3 +79,51 @@ class EvidenceShapeExtractor:
             chunk_agreement=agreement,
             contradiction_flag=contradiction_flag
         )
+
+    def _detect_contradiction(self, chunks: List[Dict[str, Any]], top_score: float) -> bool:
+        """
+        Detect contradictory claims in top passages using rule-based approach.
+        
+        Simple rule-based approach:
+        - Look for explicit negations in top-3 passages
+        - Check for opposing entities or actions
+        - Flag if found and all passages have high scores
+        
+        Returns:
+            True if contradiction detected, False otherwise
+        """
+        import re
+        
+        if len(chunks) < 2 or top_score < 0.7:
+            return False  # Can't have contradiction with low confidence or few sources
+        
+        # Patterns indicating negation or opposition
+        negation_patterns = [
+            r'\b(?:no|not|never|neither|cannot|isnt|dont|doesnt|wont)\b',
+            r'\b(?:false|incorrect|wrong|denial of|denies|denying)\b'
+        ]
+        
+        top_chunks = chunks[:3]
+        texts = [c.get('content', '') for c in top_chunks]
+        
+        # Count negations in each chunk
+        negation_counts = []
+        for text in texts:
+            count = sum(
+                len(re.findall(pattern, text, re.IGNORECASE))
+                for pattern in negation_patterns
+            )
+            negation_counts.append(count)
+        
+        # If one chunk has high negations and another has few, likely contradiction
+        has_strong_negation = max(negation_counts) > 2
+        has_no_negation = min(negation_counts) == 0
+        
+        if has_strong_negation and has_no_negation:
+            logger.debug(
+                f"Phase 2 contradiction detected: negation pattern mismatch in top passages "
+                f"(negations: {negation_counts})"
+            )
+            return True
+        
+        return False

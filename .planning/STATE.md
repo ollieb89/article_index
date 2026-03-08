@@ -2,7 +2,7 @@
 
 **Project:** Article Index — Control Architecture Milestone
 **Initialized:** 2026-03-08
-**Current Phase:** Not started — run `/gsd:plan-phase 1` to begin
+**Current Phase:** 1
 
 ## Current Status
 

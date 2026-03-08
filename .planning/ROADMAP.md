@@ -10,7 +10,7 @@
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|-----------------|
-| 1 | Startup Fix | Fix lifespan double-yield so pipeline components initialize at startup | PRE-01, PRE-02 | 3 |
+| 1 | Startup Fix | Complete    | 2026-03-08 | 3 |
 | 2 | Confidence-Driven Control | Make confidence bands produce different runtime behavior | CTRL-01 – CTRL-04 | 4 |
 | 3 | CI Verification | Prove behavior changes and calibration loop in automated tests | CTRL-05, CTRL-06 | 3 |
 | 4 | Policy Hardening | Make policy registry, replay harness, and telemetry production-reliable | PLCY-01 – PLCY-03 | 3 |
@@ -31,7 +31,7 @@
 - PRE-02: Existing hybrid RAG integration tests pass with fixed startup
 
 **Plans:**
-1. Audit and fix `lifespan()` in `api/app.py` — remove second yield, move all initialization before first yield
+1/1 plans complete
 2. Verify `app.state` attributes are set and reachable in request handlers
 3. Run full integration test suite to confirm no regression
 

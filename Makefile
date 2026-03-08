@@ -1,4 +1,4 @@
-.PHONY: up down build test test-integration logs reset help
+.PHONY: up down build test test-integration test-replay logs reset help
 
 API_BASE ?= http://localhost:8001
 API_KEY ?= change-me-long-random
@@ -11,6 +11,7 @@ help:
 	@echo "  make build       - Rebuild images"
 	@echo "  make test        - Run async integration tests"
 	@echo "  make test-integration - Same as test (explicit)"
+	@echo "  make test-replay - Run policy replay regression tests"
 	@echo "  make logs        - Tail API, worker, flower logs"
 	@echo "  make reset       - Down with volumes, then up"
 	@echo "  make smoke       - Run smoke test script"
@@ -38,3 +39,6 @@ reset:
 
 smoke:
 	API_BASE=$(API_BASE) API_KEY=$(API_KEY) ./scripts/smoke_test.sh
+
+test-replay:
+	API_BASE=$(API_BASE) API_KEY=$(API_KEY) python3 scripts/test_replay_ci.py --limit 50

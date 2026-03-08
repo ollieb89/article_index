@@ -5,7 +5,7 @@ outcomes, including confidence scores, actions taken, and answer quality.
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 import uuid
 from datetime import datetime
@@ -52,6 +52,23 @@ class PolicyTrace:
     evidence_shape: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    
+    # Phase 4: Policy infrastructure hardening fields
+    policy_hash: Optional[str] = None  # SHA-256 hash of policy content
+    telemetry_schema_version: str = "1.1"  # Schema version for forward compatibility (1.1 = Phase 5)
+    retrieval_items: List[Dict[str, Any]] = field(default_factory=list)  # Frozen retrieval snapshot
+    retrieval_parameters: Dict[str, Any] = field(default_factory=dict)  # Retrieval params at request time
+    
+    # Phase 5: Contextual Policy Routing fields
+    evidence_shape_bands: Dict[str, str] = field(default_factory=dict)  # coverage_band, agreement_band, spread_band
+    effort_budget: str = "medium"  # low, medium, high
+    matched_rule_id: Optional[str] = None  # Which rule was applied
+    matched_rule_priority: Optional[int] = None  # Priority of winning rule
+    matched_rule_specificity: Optional[int] = None  # Specificity of winning rule
+    fallback_used: bool = False  # Whether fallback was triggered
+    fallback_reason: Optional[str] = None  # Why fallback was used
+    budget_override_applied: bool = False  # Whether budget constraint downgraded path
+    requested_execution_path: Optional[str] = None  # Original path before budget override
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for JSON serialization."""
@@ -80,7 +97,22 @@ class PolicyTrace:
             "tokens_total": self.tokens_total,
             "abstention_triggered": self.abstention_triggered,
             "evidence_shape": self.evidence_shape,
-            "created_at": self.created_at
+            "created_at": self.created_at,
+            # Phase 4 fields
+            "policy_hash": self.policy_hash,
+            "telemetry_schema_version": self.telemetry_schema_version,
+            "retrieval_items": self.retrieval_items,
+            "retrieval_parameters": self.retrieval_parameters,
+            # Phase 5 fields
+            "evidence_shape_bands": self.evidence_shape_bands,
+            "effort_budget": self.effort_budget,
+            "matched_rule_id": self.matched_rule_id,
+            "matched_rule_priority": self.matched_rule_priority,
+            "matched_rule_specificity": self.matched_rule_specificity,
+            "fallback_used": self.fallback_used,
+            "fallback_reason": self.fallback_reason,
+            "budget_override_applied": self.budget_override_applied,
+            "requested_execution_path": self.requested_execution_path
         }
         
         # Merge stage_flags into metadata
@@ -90,3 +122,94 @@ class PolicyTrace:
         result["metadata"] = metadata
         
         return result
+
+
+def backfill_trace_fields(trace: Dict, source_version: str = "0.9") -> Dict:
+    """Backfill missing fields in telemetry traces for forward compatibility.
+    
+    This function ensures pre-Phase4 traces can be processed with Phase4+ code
+    by deriving missing fields from available data.
+    
+    Args:
+        trace: Telemetry trace dict (potentially from older schema version)
+        source_version: Schema version of the source trace
+        
+    Returns:
+        Updated trace dict with all Phase 4 fields populated
+    """
+    result = dict(trace)
+    
+    # Set schema version if missing
+    if not result.get('telemetry_schema_version'):
+        result['telemetry_schema_version'] = '1.0'
+    
+    # Derive retrieval_state from confidence_band if missing
+    if not result.get('retrieval_state') and result.get('confidence_band'):
+        band = result['confidence_band']
+        state_map = {
+            'high': 'SOLID',
+            'medium': 'FRAGILE',
+            'low': 'SPARSE',
+            'insufficient': 'ABSENT',
+            'unknown': 'ABSENT'
+        }
+        result['retrieval_state'] = state_map.get(band, 'ABSENT')
+    
+    # Derive stage_flags from execution_path if missing
+    if not result.get('stage_flags') and result.get('execution_path'):
+        path = result['execution_path']
+        result['stage_flags'] = {
+            'reranker_invoked': path in ['cautious', 'expanded_retrieval'],
+            'retrieval_expanded': path == 'expanded_retrieval'
+        }
+    
+    # Ensure retrieval_items exists
+    if not result.get('retrieval_items'):
+        result['retrieval_items'] = []
+    
+    # Ensure retrieval_parameters exists
+    if not result.get('retrieval_parameters'):
+        result['retrieval_parameters'] = {
+            'limit': result.get('chunks_retrieved', 5),
+            'threshold': 0.7  # Default threshold
+        }
+    
+    return result
+
+
+def validate_telemetry_health(trace: Dict) -> Tuple[bool, List[str]]:
+    """Validate telemetry trace completeness and data quality.
+    
+    Args:
+        trace: Telemetry trace dict to validate
+        
+    Returns:
+        Tuple of (is_valid: bool, error_messages: List[str])
+    """
+    errors = []
+    
+    # Check required fields
+    required_fields = [
+        'query_id', 'query_text', 'query_type', 'confidence_score',
+        'confidence_band', 'action_taken', 'routing_action', 
+        'policy_version', 'retrieval_state'
+    ]
+    
+    for field in required_fields:
+        if field not in trace or trace[field] is None:
+            errors.append(f"Missing required field: {field}")
+    
+    # Validate confidence_band values
+    valid_bands = ['high', 'medium', 'low', 'insufficient', 'unknown']
+    if trace.get('confidence_band') and trace['confidence_band'] not in valid_bands:
+        errors.append(f"Invalid confidence_band: {trace['confidence_band']}")
+    
+    # Validate routing_action present
+    if not trace.get('routing_action') and not trace.get('action_taken'):
+        errors.append("Missing routing_action or action_taken")
+    
+    # Validate policy_version present
+    if not trace.get('policy_version'):
+        errors.append("Missing policy_version")
+    
+    return len(errors) == 0, errors

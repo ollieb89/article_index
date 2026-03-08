@@ -1,12 +1,15 @@
 import json
 import os
 import re
+import logging
 import asyncpg
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_database_url(url: str) -> str:
@@ -558,6 +561,83 @@ class PolicyRepository:
             """
             rows = await conn.fetch(query, limit)
             return [dict(row) for row in rows]
+
+    async def create_policy(
+        self,
+        version: str,
+        thresholds: Dict[str, float],
+        routing_rules: Dict[str, Any] = None,
+        contextual_thresholds: Dict[str, Any] = None,
+        latency_budgets: Dict[str, int] = None
+    ) -> bool:
+        """
+        Insert a new policy version into the policy_registry.
+        
+        Args:
+            version: Semantic version identifier (e.g., "v42", "v14.0-calibrated")
+            thresholds: Confidence thresholds dict (e.g., {"high_min": 0.85, "medium_min": 0.60, ...})
+            routing_rules: Optional routing rules JSONB
+            contextual_thresholds: Optional contextual overrides
+            latency_budgets: Optional per-query-type latency budgets
+        
+        Returns:
+            True if insert succeeded, False if version already exists
+        """
+        try:
+            async with self.db.get_async_connection_context() as conn:
+                query = """
+                    INSERT INTO intelligence.policy_registry 
+                    (version, is_active, thresholds, routing_rules, contextual_thresholds, latency_budgets, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+                    ON CONFLICT (version) DO NOTHING
+                """
+                result = await conn.execute(
+                    query,
+                    version,
+                    False,  # New policies default to inactive
+                    json.dumps(thresholds),
+                    json.dumps(routing_rules or {}),
+                    json.dumps(contextual_thresholds or {}),
+                    json.dumps(latency_budgets or {})
+                )
+                return result == "INSERT 0 1"
+        except Exception as e:
+            logger.error(f"Failed to create policy {version}: {e}")
+            return False
+
+    async def set_active_policy(self, version: str) -> bool:
+        """
+        Mark a specific policy version as the active policy.
+        Deactivates all other versions.
+        
+        Args:
+            version: Policy version to activate
+        
+        Returns:
+            True if activation succeeded, False otherwise
+        """
+        try:
+            async with self.db.get_async_connection_context() as conn:
+                await conn.execute("BEGIN")
+                
+                # Deactivate all policies
+                await conn.execute(
+                    "UPDATE intelligence.policy_registry SET is_active = false, updated_at = NOW()"
+                )
+                
+                # Activate target policy
+                result = await conn.execute(
+                    "UPDATE intelligence.policy_registry SET is_active = true, updated_at = NOW() WHERE version = $1",
+                    version
+                )
+                
+                await conn.execute("COMMIT")
+                
+            logger.info(f"Activated policy version: {version}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to activate policy {version}: {e}")
+            return False
 
 
 # Global instances

@@ -34,6 +34,18 @@ class PolicyTrace:
     citation_accuracy: Optional[float] = None
     quality_score: Optional[float] = None
     
+    # Phase 2: Confidence-driven control
+    retrieval_depth: int = 0  # Number of candidates retrieved before ranking
+    reranker_invoked: bool = False  # Whether reranker was called
+    reranker_reason: Optional[str] = None  # Why: "score_gap", "weak_evidence", "conflict", "cautious_path_mandatory", etc.
+    
+    # Token accounting
+    tokens_generated: int = 0  # Tokens in final answer
+    tokens_total: int = 0  # All tokens (retrieval + generation context + answer)
+    
+    # Abstention tracking
+    abstention_triggered: bool = False  # True if query returned abstention response
+    
     evidence_shape: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -57,6 +69,13 @@ class PolicyTrace:
             "unsupported_claim_count": self.unsupported_claim_count,
             "citation_accuracy": self.citation_accuracy,
             "quality_score": self.quality_score,
+            # Phase 2 fields
+            "retrieval_depth": self.retrieval_depth,
+            "reranker_invoked": self.reranker_invoked,
+            "reranker_reason": self.reranker_reason,
+            "tokens_generated": self.tokens_generated,
+            "tokens_total": self.tokens_total,
+            "abstention_triggered": self.abstention_triggered,
             "evidence_shape": self.evidence_shape,
             "metadata": self.metadata,
             "created_at": self.created_at

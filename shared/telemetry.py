@@ -46,13 +46,16 @@ class PolicyTrace:
     # Abstention tracking
     abstention_triggered: bool = False  # True if query returned abstention response
     
+    # Stage flags for routing decisions
+    stage_flags: Dict[str, bool] = field(default_factory=dict)  # e.g., {"reranker_invoked": True, "retrieval_expanded": False}
+    
     evidence_shape: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for JSON serialization."""
-        return {
+        result = {
             "query_id": self.query_id,
             "query_text": self.query_text,
             "query_type": self.query_type,
@@ -77,6 +80,13 @@ class PolicyTrace:
             "tokens_total": self.tokens_total,
             "abstention_triggered": self.abstention_triggered,
             "evidence_shape": self.evidence_shape,
-            "metadata": self.metadata,
             "created_at": self.created_at
         }
+        
+        # Merge stage_flags into metadata
+        metadata = dict(self.metadata)
+        if self.stage_flags:
+            metadata["stage_flags"] = self.stage_flags
+        result["metadata"] = metadata
+        
+        return result

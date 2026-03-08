@@ -27,19 +27,25 @@ Usage:
 
 import logging
 import math
+import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Phase 2: Configurable confidence thresholds via environment variables
+CONFIDENCE_HIGH = float(os.getenv("CONFIDENCE_HIGH", "0.85"))
+CONFIDENCE_MEDIUM = float(os.getenv("CONFIDENCE_MEDIUM", "0.65"))
+CONFIDENCE_LOW = float(os.getenv("CONFIDENCE_LOW", "0.45"))
+
 
 class ConfidenceBand(Enum):
     """Confidence bands for evidence quality."""
-    HIGH = "high"       # > 0.75
-    MEDIUM = "medium"   # 0.50 - 0.75
-    LOW = "low"         # 0.25 - 0.50
-    INSUFFICIENT = "insufficient"  # < 0.25
+    HIGH = "high"       # >= CONFIDENCE_HIGH (0.85)
+    MEDIUM = "medium"   # CONFIDENCE_MEDIUM - CONFIDENCE_HIGH (0.65-0.84)
+    LOW = "low"         # CONFIDENCE_LOW - CONFIDENCE_MEDIUM (0.45-0.64)
+    INSUFFICIENT = "insufficient"  # < CONFIDENCE_LOW (0.45)
 
 
 @dataclass
@@ -87,27 +93,33 @@ class EvidenceScorer:
     - Prior confidence: Rerank/transform confidence from earlier stages
     
     Attributes:
-        high_confidence_threshold: Threshold for high confidence (default 0.75)
-        min_confidence_threshold: Minimum confidence for answering (default 0.25)
+        high_confidence_threshold: Threshold for high confidence (default 0.85 from CONFIDENCE_HIGH)
+        medium_confidence_threshold: Threshold for medium confidence (default 0.65 from CONFIDENCE_MEDIUM)
+        min_confidence_threshold: Minimum confidence for answering (default 0.45 from CONFIDENCE_LOW)
     """
     
     def __init__(
         self,
-        high_confidence_threshold: float = 0.75,
-        min_confidence_threshold: float = 0.25
+        high_confidence_threshold: Optional[float] = None,
+        medium_confidence_threshold: Optional[float] = None,
+        min_confidence_threshold: Optional[float] = None
     ):
         """Initialize the evidence scorer.
         
         Args:
-            high_confidence_threshold: Score above which confidence is high
-            min_confidence_threshold: Score below which evidence is insufficient
+            high_confidence_threshold: Score above which confidence is high (default: CONFIDENCE_HIGH env var or 0.85)
+            medium_confidence_threshold: Score above which confidence is medium (default: CONFIDENCE_MEDIUM env var or 0.65)
+            min_confidence_threshold: Score below which evidence is insufficient (default: CONFIDENCE_LOW env var or 0.45)
         """
-        self.high_confidence_threshold = high_confidence_threshold
-        self.min_confidence_threshold = min_confidence_threshold
+        self.high_confidence_threshold = high_confidence_threshold or CONFIDENCE_HIGH
+        self.medium_confidence_threshold = medium_confidence_threshold or CONFIDENCE_MEDIUM
+        self.min_confidence_threshold = min_confidence_threshold or CONFIDENCE_LOW
         
         logger.info(
-            f"EvidenceScorer initialized: high_threshold={high_confidence_threshold}, "
-            f"min_threshold={min_confidence_threshold}"
+            f"EvidenceScorer initialized with Phase 2 confidence thresholds: "
+            f"HIGH={self.high_confidence_threshold}, "
+            f"MEDIUM={self.medium_confidence_threshold}, "
+            f"LOW={self.min_confidence_threshold}"
         )
     
     def score_evidence(

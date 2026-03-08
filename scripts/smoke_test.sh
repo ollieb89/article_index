@@ -7,6 +7,7 @@
 set -e
 
 API_BASE="${1:-${API_BASE:-http://localhost:8001}}"
+API_KEY="${API_KEY:-change-me-long-random}"
 
 echo "Smoke test: $API_BASE"
 echo "---"
@@ -27,6 +28,7 @@ echo ""
 echo "2. Create article..."
 ARTICLE=$(curl -sf -X POST "$API_BASE/articles/" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
   -d '{
     "title": "Smoke Test Article",
     "content": "This is a smoke test. Machine learning and neural networks are key AI concepts."

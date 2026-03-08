@@ -2,6 +2,11 @@
 -- Author: Agent
 -- Date: 2026-03-07
 -- Description: Adds weighted full-text search to chunks table for hybrid retrieval
+--
+-- MIGRATION STATUS: HNSW index creation is CONDITIONAL
+-- This migration safely adds HNSW if not already present.
+-- For fresh installs, schema.sql already creates this index.
+-- This migration ensures existing databases get the index.
 
 -- Step 1: Add title column to chunks (nullable for migration safety)
 -- This denormalizes the document title into chunks for weighted search

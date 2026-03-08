@@ -23,7 +23,7 @@ cp .env.example .env
 ### 2. Start the Services
 
 ```bash
-docker-compose up -d
+docker compose up -d
 # Wait for services to be ready (~15s)
 sleep 15
 ```
@@ -47,29 +47,39 @@ ollama pull llama3.2
 
 ### 5. Manual API Test
 
+All write/admin endpoints require `X-API-Key` header (from `.env` API_KEY).
+
 ```bash
-# Health
+# Health (no auth)
 curl http://localhost:8001/health
 
 # Create article (sync)
 curl -X POST http://localhost:8001/articles/ \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: change-me-long-random" \
   -d '{"title": "Test", "content": "AI and machine learning."}'
 
 # Async ingestion (returns task_id)
 curl -X POST http://localhost:8001/articles/async \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: change-me-long-random" \
   -d '{"title": "Async Test", "content": "Background processing."}'
 
-# Task status
+# URL ingestion (fetches, extracts text, enqueues)
+curl -X POST http://localhost:8001/articles/url/async \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: change-me-long-random" \
+  -d '{"url": "https://example.com/article"}'
+
+# Task status (no auth)
 curl http://localhost:8001/tasks/<task_id>
 
-# Search
+# Search (no auth)
 curl -X POST http://localhost:8001/search \
   -H "Content-Type: application/json" \
   -d '{"query": "machine learning", "limit": 5}'
 
-# RAG
+# RAG (no auth)
 curl -X POST http://localhost:8001/rag \
   -H "Content-Type: application/json" \
   -d '{"question": "What is AI?"}'
@@ -86,9 +96,10 @@ sleep 15 && ./scripts/smoke_test.sh
 
 ## API Endpoints
 
-### Articles
+### Articles (all write endpoints require `X-API-Key`)
 - `POST /articles/` - Create article (sync, blocks until done)
 - `POST /articles/async` - Enqueue article for background processing (returns `task_id`)
+- `POST /articles/url/async` - Fetch URL, extract text, enqueue (SSRF-protected)
 - `POST /articles/html` - Create article from HTML (sync)
 - `POST /articles/html/async` - Enqueue HTML article (async)
 - `POST /articles/batch` - Create multiple articles
@@ -118,6 +129,7 @@ cp .env.example .env
 
 Key environment variables:
 - `DATABASE_URL`: PostgreSQL connection string
+- `API_KEY`: Required for write/admin endpoints (must be set)
 - `REDIS_URL`: Redis connection for Celery
 - `OLLAMA_HOST`: Ollama server URL
 - `RAG_EMBEDDING_MODEL`: Model for embeddings (default: nomic-embed-text)
@@ -148,6 +160,16 @@ Query → Embedding → Similarity Search → Context Retrieval → LLM Response
    - Batch article processing
    - Embedding updates and maintenance
 
+## Migrations
+
+For existing databases, run migrations manually:
+
+```bash
+# Add content_hash for duplicate detection
+docker exec -i article_index-db psql -U article_index -d article_index \
+  < migrations/001_add_content_hash.sql
+```
+
 ## Performance Optimization
 
 After adding data, create vector indexes for better performance:
@@ -165,6 +187,7 @@ docker exec -it article_index_db_1 psql -U articles -d articles
 - Check API health: `GET /health`
 - Monitor database stats: `GET /stats`
 - Worker health: Celery provides built-in monitoring
+- **Flower**: Celery dashboard at `http://localhost:5555` (queue health, tasks, workers)
 
 ## Troubleshooting
 
@@ -191,14 +214,9 @@ docker exec -it article_index_db_1 psql -U articles -d articles
 ### Logs
 
 ```bash
-# API logs
-docker logs article_index_api_1
-
-# Worker logs
-docker logs article_index_worker_1
-
-# Database logs
-docker logs article_index_db_1
+docker logs article_index-api
+docker logs article_index-worker
+docker logs article_index-db
 ```
 
 ## Development
@@ -212,10 +230,16 @@ docker logs article_index_db_1
 ### Testing
 
 ```bash
-# Run tests (add test suite)
-python -m pytest tests/
+pip install -r requirements-dev.txt
 
-# Manual testing with curl scripts
+# Integration tests (requires running stack + Ollama)
+make test
+# or: API_BASE=http://localhost:8001 pytest tests/ -v -m integration
+
+# Smoke test
+make smoke
+
+# Manual testing
 bash test_api.sh
 ```
 

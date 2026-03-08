@@ -8,16 +8,16 @@
 
 | Field | Value |
 |-------|-------|
-| Active Phase | None |
-| Phase Status | Not started |
-| Last Action | Project initialized |
+| Active Phase | 1: Startup Fix |
+| Phase Status | Planned — ready for execution |
+| Last Action | Phase 1 plan created |
 | Blocking Issues | None |
 
 ## Phase Progress
 
 | Phase | Status | Started | Completed |
 |-------|--------|---------|-----------|
-| 1: Startup Fix | Not started | — | — |
+| 1: Startup Fix | Planned | — | — |
 | 2: Confidence-Driven Control | Not started | — | — |
 | 3: CI Verification | Not started | — | — |
 | 4: Policy Hardening | Not started | — | — |
@@ -26,8 +26,10 @@
 ## Notes
 
 - Project is brownfield — extensive existing implementation in place
-- Pre-condition: FastAPI lifespan() double-yield bug must be fixed before any control-loop work
-- Control loop pieces are wired in the pipeline; routing signal currently drives nothing at runtime
+- Phase 1 PLAN.md created with detailed breakdown of lifespan double-yield bug
+- Bug identified: initialization code after first yield (lines 205–334) never runs at startup
+- Components affected: hybrid_retriever, query_transformer, context_filter, reranker, context_builder
+- Next: Execute Phase 1 plan using `/gsd:execute-phase 1`
 
 ---
-*Last updated: 2026-03-08 after project initialization*
+*Last updated: 2026-03-08 | Phase 1 plan complete*

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from typing import List, Dict, Any, Optional
 from bs4 import BeautifulSoup
@@ -7,6 +8,12 @@ from shared.ollama_client import OllamaClient, TextProcessor
 from shared.database import document_repo
 
 logger = logging.getLogger(__name__)
+
+
+def compute_content_hash(title: str, content: str) -> str:
+    """SHA256 hash of title + content for duplicate detection."""
+    raw = f"{title}\n\n{content}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 class ArticleProcessor:
@@ -28,12 +35,23 @@ class ArticleProcessor:
         try:
             # Clean the content
             cleaned_content = self.text_processor.clean_text(content)
+            content_hash = compute_content_hash(title, cleaned_content)
+
+            # Check for duplicate
+            existing = await document_repo.get_document_by_content_hash(content_hash)
+            if existing:
+                return {
+                    "document_id": existing["id"],
+                    "duplicate": True,
+                    "message": "Document already exists",
+                }
 
             # Create document first
             document_id = await document_repo.create_document(
                 title=title,
                 content=cleaned_content,
-                metadata=metadata
+                metadata=metadata,
+                content_hash=content_hash,
             )
 
             # Generate document embedding
@@ -61,13 +79,15 @@ class ArticleProcessor:
                 chunk_data.append({
                     'content': chunk_content,
                     'embedding': chunk_embedding,
-                    'chunk_index': i
+                    'chunk_index': i,
+                    'title': title  # Pass title for hybrid search
                 })
 
-            # Store chunks
+            # Store chunks with title
             chunk_ids = await document_repo.create_chunks(
                 document_id,
-                chunk_data
+                chunk_data,
+                title=title
             )
 
             logger.info(f"Processed article '{title}': {len(chunks)} chunks created")

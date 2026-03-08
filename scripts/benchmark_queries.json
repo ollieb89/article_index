@@ -1,0 +1,20 @@
+{
+  "description": "Sample benchmark queries for HNSW evaluation",
+  "queries": [
+    "What is machine learning and how does it work?",
+    "Explain vector search and embeddings",
+    "How does neural network training work?",
+    "Python 3.11 asyncio best practices",
+    "PostgreSQL pgvector extension setup",
+    "API authentication JWT tokens",
+    "docker compose health check configuration",
+    "fastapi dependency injection patterns",
+    "celery redis queue configuration",
+    "semantic search",
+    "RAG pipeline",
+    "chunking strategies",
+    "HNSW index parameters tuning",
+    "vector database performance optimization",
+    "full-text search vs vector search"
+  ]
+}

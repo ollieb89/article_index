@@ -376,3 +376,253 @@ class HybridRetriever:
         merged = self.merge_and_rerank(lexical_hits, vector_hits, weights)
         
         return merged[:k]
+    
+    async def retrieve_with_transform(
+        self,
+        query: str,
+        query_transformer,
+        query_embedding: Optional[List[float]] = None,
+        k: int = 8,
+        latency_budget_ms: Optional[float] = None
+    ) -> tuple[List[Dict[str, Any]], Any, Dict[str, Any]]:
+        """Retrieve with query transformation for improved recall.
+        
+        This method transforms the query into multiple variants,
+        retrieves for each, and merges results with deduplication.
+        
+        Includes latency budget guard: if retrieval time exceeds budget,
+        remaining expansions are skipped.
+        
+        Args:
+            query: User query string
+            query_transformer: QueryTransformer instance
+            query_embedding: Optional pre-computed embedding
+            k: Number of top results to return
+            latency_budget_ms: Optional latency budget in milliseconds
+            
+        Returns:
+            Tuple of (results, transform_decision, merge_metadata)
+        """
+        import time
+        from shared.query_transformer import TransformDecision
+        
+        start_time = time.perf_counter()
+        
+        # First, do a quick retrieval to check for low evidence
+        # This helps the transformer decide if transformation is needed
+        quick_results = await self.retrieve(query, query_embedding, k=min(k, 5))
+        
+        # Transform the query
+        decision = query_transformer.transform(query, candidates=quick_results)
+        
+        if not decision.should_transform or len(decision.transformed_queries) == 1:
+            # No transformation needed or applied, return original results
+            if not quick_results:
+                quick_results = await self.retrieve(query, query_embedding, k=k)
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            metadata = {
+                'transform_applied': False,
+                'queries_used': 1,
+                'latency_ms': round(elapsed_ms, 2)
+            }
+            return quick_results, decision, metadata
+        
+        # Retrieve for each transformed query
+        logger.info(
+            f"Query transformation: '{query[:50]}...' -> "
+            f"{len(decision.transformed_queries)} queries: {decision.transform_types}"
+        )
+        
+        all_results = []
+        queries_used = 0
+        budget_exceeded = False
+        
+        for idx, tq in enumerate(decision.transformed_queries):
+            # Check latency budget before each retrieval
+            if latency_budget_ms:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                remaining_budget = latency_budget_ms - elapsed_ms
+                
+                if remaining_budget < 20:  # Need at least 20ms for useful retrieval
+                    logger.warning(
+                        f"Latency budget exceeded after {queries_used} queries "
+                        f"({elapsed_ms:.1f}ms > {latency_budget_ms}ms), "
+                        f"skipping remaining expansions for '{query[:50]}...'"
+                    )
+                    budget_exceeded = True
+                    break
+            
+            # Get embedding for transformed query if needed
+            if query_embedding is not None and tq.lower() == query.lower():
+                tq_embedding = query_embedding
+            else:
+                # Generate new embedding for transformed query
+                # Note: This requires ollama client - handled by caller
+                tq_embedding = None
+            
+            results = await self.retrieve(tq, tq_embedding, k=k * 2)  # Get more for merging
+            all_results.append(results)
+            queries_used += 1
+            
+            # Early exit if we have enough results and budget is tight
+            if latency_budget_ms and idx > 0:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                remaining_budget = latency_budget_ms - elapsed_ms
+                
+                # If we have results from 2+ queries and budget is tight, stop
+                if queries_used >= 2 and remaining_budget < 50:
+                    logger.info(
+                        f"Early exit: {queries_used} queries sufficient, "
+                        f"{remaining_budget:.1f}ms budget remaining"
+                    )
+                    break
+        
+        # Merge and deduplicate results using RRF
+        merged, merge_metadata = query_transformer.merge_results(all_results, query, max_results=k)
+        
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        merge_metadata['transform_applied'] = True
+        merge_metadata['queries_planned'] = len(decision.transformed_queries)
+        merge_metadata['queries_used'] = queries_used
+        merge_metadata['budget_exceeded'] = budget_exceeded
+        merge_metadata['latency_ms'] = round(elapsed_ms, 2)
+        
+        if latency_budget_ms:
+            merge_metadata['latency_budget_ms'] = latency_budget_ms
+            merge_metadata['budget_utilization'] = round(elapsed_ms / latency_budget_ms, 2)
+        
+        return merged, decision, merge_metadata
+    
+    async def retrieve_with_ranking_mode(
+        self,
+        query: str,
+        query_embedding: Optional[List[float]] = None,
+        k: int = 8,
+        ranking_mode: str = 'weighted'
+    ) -> List[Dict[str, Any]]:
+        """Retrieve using a specific ranking mode.
+        
+        This method allows explicit selection of ranking mode for benchmarking
+        and comparison purposes.
+        
+        Args:
+            query: User query string
+            query_embedding: Optional pre-computed embedding
+            k: Number of top results to return
+            ranking_mode: 'weighted' or 'rrf'
+            
+        Returns:
+            List of top-k chunk dicts
+        """
+        # Save current mode
+        original_use_rrf = self.use_rrf
+        
+        try:
+            # Set requested mode
+            if ranking_mode == 'rrf':
+                self.use_rrf = True
+            elif ranking_mode == 'weighted':
+                self.use_rrf = False
+            else:
+                raise ValueError(f"Unknown ranking_mode: {ranking_mode}. Use 'weighted' or 'rrf'")
+            
+            # Run retrieval
+            return await self.retrieve(query, query_embedding, k)
+        finally:
+            # Restore original mode
+            self.use_rrf = original_use_rrf
+    
+    async def compare_ranking_modes(
+        self,
+        query: str,
+        query_embedding: Optional[List[float]] = None,
+        k: int = 8
+    ) -> Dict[str, Any]:
+        """Compare weighted and RRF ranking for the same query.
+        
+        This is useful for benchmarking and evaluation to determine which
+        ranking method works better for a given corpus.
+        
+        Args:
+            query: User query string
+            query_embedding: Optional pre-computed embedding
+            k: Number of top results to return
+            
+        Returns:
+            Dict with results from both modes and comparison metrics
+        """
+        import time
+        
+        # Fetch candidates once
+        weights = self.detect_query_type(query)
+        
+        lexical_hits = await self.fetch_lexical(query)
+        vector_hits = await self.fetch_vector(query_embedding) if query_embedding else []
+        
+        results = {
+            'query': query,
+            'k': k,
+            'lexical_candidates': len(lexical_hits),
+            'vector_candidates': len(vector_hits),
+            'overlap_candidates': len(set(x['id'] for x in lexical_hits) & 
+                                       set(x['id'] for x in vector_hits))
+        }
+        
+        # Test weighted ranking
+        start = time.perf_counter()
+        self.use_rrf = False
+        if lexical_hits and vector_hits:
+            weighted_results = self.merge_and_rerank(lexical_hits, vector_hits, weights)[:k]
+        elif vector_hits:
+            weighted_results = self.normalize_scores(vector_hits, 'semantic_score')[:k]
+        elif lexical_hits:
+            weighted_results = self.normalize_scores(lexical_hits, 'lexical_score')[:k]
+        else:
+            weighted_results = []
+        weighted_time_ms = (time.perf_counter() - start) * 1000
+        
+        # Test RRF ranking
+        start = time.perf_counter()
+        self.use_rrf = True
+        if lexical_hits and vector_hits:
+            rrf_results = self.merge_and_rerank(lexical_hits, vector_hits, weights)[:k]
+        elif vector_hits:
+            rrf_results = self.normalize_scores(vector_hits, 'semantic_score')[:k]
+        elif lexical_hits:
+            rrf_results = self.normalize_scores(lexical_hits, 'lexical_score')[:k]
+        else:
+            rrf_results = []
+        rrf_time_ms = (time.perf_counter() - start) * 1000
+        
+        # Calculate overlap between modes
+        weighted_ids = set(r['id'] for r in weighted_results)
+        rrf_ids = set(r['id'] for r in rrf_results)
+        overlap = weighted_ids & rrf_ids
+        
+        results['weighted'] = {
+            'chunk_ids': [r['id'] for r in weighted_results],
+            'scores': [round(r.get('hybrid_score', 0), 4) for r in weighted_results],
+            'latency_ms': round(weighted_time_ms, 3),
+            'from_lexical': sum(1 for r in weighted_results if r.get('from_lexical')),
+            'from_vector': sum(1 for r in weighted_results if r.get('from_vector'))
+        }
+        
+        results['rrf'] = {
+            'chunk_ids': [r['id'] for r in rrf_results],
+            'scores': [round(r.get('hybrid_score', 0), 4) for r in rrf_results],
+            'latency_ms': round(rrf_time_ms, 3),
+            'from_lexical': sum(1 for r in rrf_results if r.get('from_lexical')),
+            'from_vector': sum(1 for r in rrf_results if r.get('from_vector'))
+        }
+        
+        results['comparison'] = {
+            'overlap_count': len(overlap),
+            'overlap_ids': list(overlap),
+            'weighted_only': list(weighted_ids - rrf_ids),
+            'rrf_only': list(rrf_ids - weighted_ids),
+            'latency_delta_ms': round(rrf_time_ms - weighted_time_ms, 3),
+            'latency_delta_pct': round((rrf_time_ms - weighted_time_ms) / weighted_time_ms * 100, 1) 
+                                if weighted_time_ms > 0 else 0
+        }
+        
+        return results
